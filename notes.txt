@@ -1,0 +1,72 @@
+CODE
+
+Place human in middle of a SimpleHeatGame.
+
+They see data from 6 sensors, e.g. a uniform heat across their front directional sensors, but sense no heat at current location. What aspects of higher-level state/memory are needed to make the right decisions?
+
+Depth:
+None - we always move towards forward heat source.
+
+What if we sense no heat?
+
+Depth:
+- Are we scanning left / right?
+- Are we driving?
+- Where have we been before?
+
+Low level patterns / naming to learn:
+- All cold sensors, no current temperature --> cold ahead
+- All hot sensors, no current temperature --> hot ahead
+- Sensors incrementally get hotter while driving --> driving towards heat
+- Current heat, not moving, getting rewarded, heat reducing incrementally --> eating
+
+High level patterns / structures to learn:
+
+- All cold followed by driving followed by bad
+- Left heat, followed by turning left and driving followed by good
+- Present heat followed by less heat followed by less heat followed by loss of good (consumed resource)
+
+NEXT: 
+- How do we notice patterns that include temporarly component?
+- Some sort of register to maintains high-level (or multilevel) patterns that we've seen recently?
+- Neuron memory? Investigate theories on memory.
+- Finish Cortical Learning Algorithm and implement
+
+
+
+NOTES
+
+Intelligence
+
+- Multilayered (hierarchy)
+- Invariant structures (pattern recognition with variance, relativistic, and partial completion)
+- Auto-association
+
+Humans:
+- Probably born with curiosity, which guarantees exposure to many patterns, which enables learning. How do you program software with curiosity?  
+- 
+
+Random:
+- Could higher-level planning be artificially producing memory to recall along the way? Ah, I’m in a pattern “ABC” and I remember / match “ABCD” (my plan), so next step is D.
+
+
+Processing:
+At any given moment in time, we fit multiple patterns potentially across multiple levels of hierarchy, against our memory. Schrodinger’s cat? All fits are equally true. Are some mutually exclusive, and some complementary? Perhaps separated by different levels of hierarchy? Hierarchy may provide for higher level analysis that enables longer-term temporal patterns, or higher level analysis such as ‘face in view’. These fitted patterns may be incomplete and can be extrapolated/interpolated to do things like fill in gaps in an image, or make assumptions about repetitions, or guess states in the future. We continue to verify that the patterns we’re in are unchanging (confirming we’re observing reality), until something unexpected/unpredicted happens. When this happens strongly enough, we look for other patterns to explain the difference. If no other patterns explain the new direction, we begin to update our network to strengthen the new pattern and remember it. We don’t know any patterns until we see them repeatedly (and perhaps from different ‘angles’? invariance confirming reality?)
+
+New neural model explains millions of dendrites far from cell body. Not just global shifts (e.g. attention), but that neurons can learn precise co-incidences of dendrite activity, as well as subtleties like order.  So neurons can recognize and fire with a much larger number of input patterns, but can they also learn temporary patterns. How?
+
+We rate the level of fit with each pattern that looks familiar
+
+Should autonomously generated behaviors be part of this pattern recognition, or separate inputs? Could a layer of pattern identification be “i’m moving forward as I see the circle in front of me get bigger” such that we can easily extrapolate this to “if i keep moving forward the circle will continue to grow”
+
+Synthesized:
+- Brains are at the most basic level multi-level, fuzzy pattern recognizers and inter/extrapolaters. We can interpolate patterns when complete information isn’t available (guessing what we’re looking at / hearing), and extrapolate incomplete patterns, for example incomplete temporal sequences (predictions of the future). These are the same process, not different. 
+
+How does reward work? Perhaps some patterns get associated with reward (are excited together). If we are in these patterns that associate to reward, we likely feel some low-level reward. Then we try to complete the pattern to redeem the full reward? Do we automatically try to complete patterns linked to reward, and avoid those linked to negative reward (e.g. pain)? Or is there a higher level decision process.
+
+Perhaps planning is formulating a goal and then choosing patterns that result in that goal.
+
+Key questions:
+- How are the multiple levels “face neurons” generated / trained?
+- Attention?
+- Does the conversion to binary synapse weights lose something useful in biological stochastic weights? Evolutionary process? Testing variance in connections?
