@@ -101,12 +101,14 @@ class AgentState():
 
 class RotateBehavior(Behavior):
 
-    def __init__(self, nickname, world):
+    def __init__(self, nickname, world, cw=True):
+        self.cw = cw
         super(RotateBehavior, self).__init__(nickname, world)
 
     def actuate(self, magnitude, state):
         super(RotateBehavior, self).actuate(magnitude, state)
-        theta = (magnitude - 0.5) * (self.world.MAX_ROT_VELOCITY) # Rad, CCW
+        direction = 1 if self.cw else -1
+        theta = magnitude * direction * (self.world.MAX_ROT_VELOCITY) # Rad, CCW
         z_axis = [0, 0, 1]
         rm = util.rotation_matrix(z_axis, theta)
         dir_3d = np.append(state.direction, [0])
@@ -132,7 +134,7 @@ class SimpleHeatAgent(Agent):
     DRAW_SIZE = 1
     DRAW_ARC = 80
 
-    def __init__(self, world):
+    def __init__(self, world, brain):
         sensors = [
             HeatAntennaSensor('nw', world, [-1,1]),
             HeatAntennaSensor('nnw', world, [-0.5,1]),
@@ -142,11 +144,12 @@ class SimpleHeatAgent(Agent):
             HeatAntennaSensor('here', world, [0,0], utility=1)  # Redeemed reward
         ]
         behaviors = [
-            RotateBehavior('rotate', world),
+            RotateBehavior('turn right', world, cw=True),
+            RotateBehavior('turn left', world, cw=False),            
             DriveBehavior('drive', world)
         ]
         state = AgentState(world)
-        super(SimpleHeatAgent, self).__init__(state, sensors, behaviors)
+        super(SimpleHeatAgent, self).__init__(state, brain, sensors, behaviors)
 
     # Graphics
 

@@ -7,11 +7,11 @@
 
 import numpy as np
 import random
+import util
 
 # Settings
 
-VERBOSE = True
-
+VERBOSITY = 2
 CONNECTED_PERM = 0.2  # If the permanence value for a synapse is greater than this value, it is said to be connected.
 MIN_OVERLAP = 2  # A minimum number of inputs that must be active for a column to be considered during the inhibition step
 DUTY_HISTORY = 1000
@@ -22,6 +22,10 @@ INIT_PERMANENCE_JITTER = 0.05  # Max offset from CONNECTED_PERM when initializin
 NEW_SYNAPSE_COUNT = 5
 
 RETAIN_STEPS = 3
+
+def log(message, level=1):
+    if VERBOSITY >= level:
+        print message
 
 class SegmentUpdate(object):
 
@@ -58,16 +62,16 @@ class Synapse(object):
     def connected(self, connectionPermanence=CONNECTED_PERM):
         return self.permanence > connectionPermanence
 
-    def active(self, t, state='active'):
+    def active(self, tMinus=0, state='active'):
         if self.proximal():
-            input = self.region._get_input(self.source, t)
+            input = self.region._get_input(self.source, tMinus)
             return input
         else:
             # Distal
             if state == 'active':
-                return self.column.cells[self.source]._in_active_state(t)
+                return self.column.cells[self.source]._in_active_state(tMinus)
             elif state == 'learn':
-                return self.column.cells[self.source]._in_learn_state(t)
+                return self.column.cells[self.source]._in_learn_state(tMinus)
             else:
                 raise Exception("State not allowed")
 
@@ -94,7 +98,7 @@ class Segment(object):
         # Setup initial potential synapses
         MAX_INIT_SYNAPSE_CHANCE = 0.5
         MIN_INIT_SYNAPSE_CHANCE = 0.05
-        n_inputs = self.region.inputs_per_region
+        n_inputs = self.region.n_inputs
         for source in range(n_inputs):
             dist = abs(column.center - source)            
             chance_of_synapse = (MAX_INIT_SYNAPSE_CHANCE * (1 - float(dist)/n_inputs)) + MIN_INIT_SYNAPSE_CHANCE
@@ -103,32 +107,32 @@ class Segment(object):
                 perm = CONNECTED_PERM + INIT_PERMANENCE_JITTER*(random.random()-0.5)
                 s = Synapse(self.region, source, perm)
                 self.potential_synapses.append(s)
-        print "Initialized %s" % self
+        log("Initialized %s" % self)
 
-    def active(self, t, state='active'):  # state in ['active','learn']
+    def active(self, tMinus, state='active'):  # state in ['active','learn']
         '''
         This routine returns true if the number of connected synapses on segment
         s that are active due to the given state at time t is greater than
         activationThreshold. The parameter state can be activeState, or
         learnState.
         '''
-        n_active = len(self.active_synapses(t, state=state))
+        n_active = len(self.active_synapses(tMinus, state=state))
         return n_active > self.activation_threshhold
 
-    def active_synapses(self, t, state='active', connectionPermanence=CONNECTED_PERM):
-        return filter(lambda s : s.active(t, state=state), self.connected_synapses(connectionPermanence=connectionPermanence))
+    def active_synapses(self, tMinus, state='active', connectionPermanence=CONNECTED_PERM):
+        return filter(lambda s : s.active(tMinus, state=state), self.connected_synapses(connectionPermanence=connectionPermanence))
 
     def connected_synapses(self, connectionPermanence=CONNECTED_PERM):
         return filter(lambda s : s.connected(connectionPermanence=connectionPermanence), self.potential_synapses)
 
-    def get_segment_active_synapses(self, t, new_synapses=False):
+    def get_segment_active_synapses(self, tMinus=0, new_synapses=False):
         '''
         Return SegmentUpdate() object
         '''
-        active_synapses = self.active_synapses(t)
+        active_synapses = self.active_synapses(tMinus)
         n_new_synapses = NEW_SYNAPSE_COUNT - len(active_synapses) if new_synapses else 0
         if n_new_synapses > 0:
-            learn_synapses = self.active_synapses(t, state='learn')
+            learn_synapses = self.active_synapses(tMinus, state='learn')
             active_synapses.extend(random.sample(learn_synapses, min(len(learn_synapses), n_new_synapses)))
         return SegmentUpdate(segment_index=self.index, active_synapses=active_synapses, sequence=False)
 
@@ -194,7 +198,7 @@ class Cell(object):
                 best_seg_index = i
         return (best_seg_index, most_active_synapses)
 
-    def adapt_segments(positive_reinforcement=True):
+    def adapt_segments(self, positive_reinforcement=True):
         # Prepare update dictionary
         update_active_synapses_by_segment = {}  # segment_index -> list of synapse sources (c, i)
         # TODO: Do active_synapses need column index?
@@ -203,7 +207,7 @@ class Cell(object):
                 update_active_synapses_by_segment[su.segment_index] = []
             update_active_synapses_by_segment[su.segment_index].extend(su.active_synapses)
         for seg in self.segments:
-            active_synapses = update_active_synapses_by_segment[seg.index]
+            active_synapses = update_active_synapses_by_segment.get(seg.index, [])
             for s in seg.potential_synapses:
                 if s.source in active_synapses:
                     if positive_reinforcement:
@@ -234,11 +238,16 @@ class Column(object):
         # Setup
         self.index = index
         self.region = region
-        self.center = np.random.random() * region.inputs_per_region  # In 1D, this is a single integer index above a particular input. TODO: Convert to 2D?
+        self.center = np.random.random() * region.n_inputs  # In 1D, this is a single integer index above a particular input. TODO: Convert to 2D?
         self.segment = Segment(index=0, region=region)  # Proximal dendrite segment with synapses
 
         # State
         self.cells = []
+        
+        # History
+        self.recent_active_duty = []  # After inhibition, list of bool
+        self.recent_overlap_duty = []  # Overlap > minOverlap, list of bool
+
 
     def initialize(self):
         for c in range(self.region.cells_per_column):
@@ -284,15 +293,20 @@ class Column(object):
         if len(self.recent_overlap_duty) > DUTY_HISTORY:
             # Truncate
             self.recent_overlap_duty = self.recent_overlap_duty[:DUTY_HISTORY]  
-        self.active_duty_cycle = sum(self.recent_active_duty) / len(self.recent_active_duty)
-        self.overlap_duty_cycle = sum(self.recent_overlap_duty) / len(self.recent_overlap_duty)        
+        x = sum(self.recent_active_duty) / len(self.recent_active_duty)
+        self.region.active_duty_cycle[self.index] = x
+        self.region.overlap_duty_cycle[self.index] = sum(self.recent_overlap_duty) / len(self.recent_overlap_duty)        
 
     def connected_receptive_field_size(self):
         '''
         Returns max distance (radius) among currently connected synapses
         '''
         connected = self.connected_synapses()
-        return max([s.distance_from(self.center) for s in connected])
+        distances = [s.distance_from(self.center) for s in connected]
+        if distances:
+            return max(distances)
+        else:
+            return 0
 
 
     def connected_synapses(self):
@@ -305,7 +319,7 @@ class Region(object):
     Made up of many columns
     '''
 
-    def __init__(self, brain, desired_local_activity=5, permanence_inc=0.1, permanence_dec=0.1, columns_per_region=10, cells_per_column=3, inputs_per_region=20):
+    def __init__(self, brain, desired_local_activity=5, permanence_inc=0.1, permanence_dec=0.1, n_columns=10, cells_per_column=3, n_inputs=20):
         self.brain = brain
 
         # Region constants (spatial)
@@ -318,47 +332,48 @@ class Region(object):
         self.cells_per_column = cells_per_column
 
         # Hierarchichal setup
-        self.columns_per_region = columns_per_region
-        self.inputs_per_region = inputs_per_region
+        self.n_columns = n_columns
+        self.n_inputs = n_inputs
         self.columns = []
 
-        # Current state
+        # State (historical)
+        self.input = np.zeros((0, self.n_inputs))  # Inputs at time t - input[t, j] is int
+        self.active_columns = np.zeros((0, self.n_columns))  # Column activity at time t, column c - active_columns(t, c) is bool
 
-        # New form data structures - Spatial
-        self.active_columns = np.zeros((1, self.columns_per_region))  # Column activity at time t, column c - active_columns(t, c) is bool
-        self.input = np.zeros((1, self.inputs_per_region))  # Inputs at time t - input[t, j] is int
-        self.overlap = np.zeros(self.columns_per_region)  # Overlap for each column. overlap[c] is int
-        self.neighbors = self._init_neighbors()  # List of lists (column neighbors list for each column neighbors[c])
-        self.boost = np.ones(self.columns_per_region, dtype=float)  # Boost value for column c
+        # State
+        self.overlap = np.zeros(self.n_columns)  # Overlap for each column. overlap[c] is int
+        self.neighbors = []
+        self.boost = np.ones(self.n_columns, dtype=float)  # Boost value for column c
         self.potential_synapses = [c.segment.potential_synapses for c in self.columns] # potential_synapses(c)
         self.connected_synapses = [c.segment.connected_synapses() for c in self.columns]  # TODO: Need a getter function?
-        self.active_duty_cycle = np.array(self.columns_per_region, dtype=float)  # Sliding average: how often column c has been active after inhibition (e.g. over the last 1000 iterations).
-        self.overlap_duty_cycle = np.array(self.columns_per_region, dtype=float)  # Sliding average: how often column c has had significant overlap (> minOverlap)
-        self.min_duty_cycle = np.array(self.columns_per_region, dtype=float)  # Minimum desired firing rate for a cell. If a cell's firing rate falls below this value, it will be boosted. This value is calculated as 1% of the maximum firing rate of its neighbors.
-        # History
-        self.recent_active_duty = []  # After inhibition, list of bool
-        self.recent_overlap_duty = []  # Overlap > minOverlap, list of bool
-
+        self.active_duty_cycle = np.zeros((self.n_columns))  # Sliding average: how often column c has been active after inhibition (e.g. over the last 1000 iterations).
+        self.overlap_duty_cycle = np.zeros((self.n_columns))  # Sliding average: how often column c has had significant overlap (> minOverlap)
+        self.min_duty_cycle = np.zeros((self.n_columns))  # Minimum desired firing rate for a cell. If a cell's firing rate falls below this value, it will be boosted. This value is calculated as 1% of the maximum firing rate of its neighbors.
+        
         # New form data structures - Temporal        
-        self.active_state = np.zeros((self.columns_per_region, self.cells_per_column, 1))  # active_state(c, i, t)
-        self.predictive_state = np.zeros((self.columns_per_region, self.cells_per_column, 1))  # predictive_state(c, i, t)
-        self.learn_state = np.zeros((self.columns_per_region, self.cells_per_column, 1))  # learn_state(c, i, t)
+        self.active_state = np.zeros((self.n_columns, self.cells_per_column, 0))  # active_state(c, i, t)
+        self.predictive_state = np.zeros((self.n_columns, self.cells_per_column, 0))  # predictive_state(c, i, t)
+        self.learn_state = np.zeros((self.n_columns, self.cells_per_column, 0))  # learn_state(c, i, t)
+
+    def __str__(self):
+        return "<Region inputs=%d/>" % self.n_inputs
 
     def initialize(self):
-        # Create columns
-        for i in range(self.columns_per_region):
+        # Create columns & get neighbors
+        for i in range(self.n_columns):
             col = Column(region=self, index=i)
             col.initialize()
             self.columns.append(col)
-
+        self.neighbors = [self._neighbors_of(c) for c in self.columns]  # List of lists (column neighbors list for each column neighbors[c])
+        print "Initialized %s" % self
         
     def _get_input(self, j, tMinus=0):
         '''
         At index j, at time t - tMinus
         tMinus 0 is now, positive is steps back in time
         '''
-        present = self.input.shape[0]  # Number of time step rows in input ndarray
-        t = present - 1 - tMinus
+        present = self.input.shape[0] - 1  # Number of time step rows in input ndarray
+        t = present - tMinus
         if t >= 0:
             return self.input[t][j]
         else:
@@ -371,18 +386,15 @@ class Region(object):
         return sorted(self.overlap)[k-1]
 
     def _max_duty_cycle(self, cols):
-        return max([c.active_duty_cycle for c in cols])
-
-    def _init_neighbors(self):
-        neighbors = []
-        for c in self.columns:
-            cneighbors = self._neighbors_of(c)
-            neighbors.append(cneighbors)
-        return neighbors
+        if cols:
+            return max([c.active_duty_cycle for c in cols])
+        else:
+            return 0
 
     def _neighbors_of(self, column):
         '''
         Return all columns within inhibition radius
+        TODO: Make 2D?
         '''
         _neighbors = []
         for c in self.columns:
@@ -425,13 +437,12 @@ class Region(object):
         for c, col in enumerate(self.columns):
             overlaps[c] = 0
             for s in col.connected_synapses():
-                overlaps[c] += self.inputs[s.source]
+                overlaps[c] += self._get_input(s.source)
             if overlaps[c] < MIN_OVERLAP:
                 overlaps[c] = 0
             else:
                 overlaps[c] = overlaps[c] * self.boost[c]
-        if VERBOSE:
-            print "Overlap: ", overlaps
+        log("Overlap: %s" % overlaps, level=3)
         return overlaps
 
     def do_inhibition(self):
@@ -447,9 +458,9 @@ class Region(object):
         return active
 
     def do_learning(self):
-        for c in active:
-            for s in c.potential_synapses:
-                if s.active(self.inputs):
+        for col in self._get_active_columns():
+            for s in col.segment.potential_synapses:
+                if s.active():
                     s.permanence += self.permanence_inc
                     s.permanence = min(1.0, s.permanence)
                 else:
@@ -459,9 +470,9 @@ class Region(object):
         all_field_sizes = []
         for c, col in enumerate(self.columns):
             min_duty_cycle = 0.01 * self._max_duty_cycle(self.neighbors[c])
-            column_active = self._get_active_columns()[c]
+            column_active = self.active_columns[-1][c]
             sufficient_overlap = self.overlap[c] > MIN_OVERLAP
-            self.update_duty_cycles(c, active=column_active, overlap=sufficient_overlap)
+            col.update_duty_cycles(active=column_active, overlap=sufficient_overlap)
             self.boost[c] = self._boost_function(c, min_duty_cycle)  # Updates boost value for column (higher if below min)
 
             # Check if overlap duty cycle less than minimum (note: min is calculated from max *active* not overlap)
@@ -471,16 +482,14 @@ class Region(object):
             all_field_sizes.append(self.columns[c].connected_receptive_field_size())
 
         # Update inhibition radius (based on updated active connections in each column)
-        self.inhibition_radius = tools.average(all_field_sizes)
+        self.inhibition_radius = util.average(all_field_sizes)
 
-    def spatial_pooling(self, inputs, learning_enabled=True):
+    def spatial_pooling(self, learning_enabled=True):
         '''
         Spatial pooling routine
         --------------
-        Takes inputs and calculates active columns (sparse representation) for input into temporal pooling
+        Takes input and calculates active columns (sparse representation) for input into temporal pooling
         '''
-        self.inputs = inputs
-
         # Phase 1: Overlap
         self.overlap = self.do_overlap()
 
@@ -530,7 +539,7 @@ class Region(object):
                 # Set learn state...
                 c._set_learn_state()
                 # ...and add a segment to this cell
-                sUpdate = c.segments[seg_index].get_segment_active_synapses(t-1, new_synapses=True)
+                sUpdate = c.segments[seg_index].get_segment_active_synapses(-1, new_synapses=True)
                 sUpdate.sequence = True
                 c.segment_update_list.append(sUpdate)
 
@@ -544,11 +553,11 @@ class Region(object):
                     if seg.active(t):
                         cell._set_predictive_state()
                         
-                        activeUpdate = seg.get_segment_active_synapses(t)
+                        activeUpdate = seg.get_segment_active_synapses()
                         cell.segment_update_list.append(activeUpdate)
 
                         predSegment = cell.get_best_matching_segment(t-1)
-                        predUpdate = predSegment.get_segment_active_synapses(t-1, new_synapses=True)
+                        predUpdate = predSegment.get_segment_active_synapses(-1, new_synapses=True)
                         cell.segment_update_list.append(predUpdate)
                     
                 # TODO: Is output calculation right, boolean OR of any predictive/active cell makes column output 1?
@@ -564,9 +573,9 @@ class Region(object):
                 if cell._in_learn_state():
                     cell.adapt_segments(positive_reinforcement=True)
                 else:
-                    stopped_predicting = cell._in_predictive_state(t-1) and not cell._in_predictive_state()
+                    stopped_predicting = cell._in_predictive_state(tMinus=-1) and not cell._in_predictive_state()
                     if stopped_predicting:
-                        self.adapt_segments(positive_reinforcement=False)
+                        cell.adapt_segments(positive_reinforcement=False)
 
 
     def temporal_pooling(self, learning_enabled=True):
@@ -593,46 +602,49 @@ class Region(object):
     ##################
 
     def step(self, input, learning_enabled=False):
-        if VERBOSE:
-            print "Step... Inputs: %s" % input
-        self.spatial_pooling(input, learning_enabled=learning_enabled)  # Calculates active columns
-        if VERBOSE:
-            print "Active columns: %s" % self.active_columns[-1]
+        # Add input for time t to input historical state
+        self.input = np.vstack((self.input, input))  
+
+        # Add 0 arrays to historical state
+        self.active_state = np.dstack((self.active_state, np.zeros((self.n_columns, self.cells_per_column))))
+        self.predictive_state = np.dstack((self.active_state, np.zeros((self.n_columns, self.cells_per_column))))        
+        self.learn_state = np.dstack((self.active_state, np.zeros((self.n_columns, self.cells_per_column))))                
+        
+        self.spatial_pooling(learning_enabled=learning_enabled)  # Calculates active columns
+        log("%s << Active columns" % self.active_columns[-1])
         out = self.temporal_pooling(learning_enabled=learning_enabled)
-        if VERBOSE:
-            print "Output: %s" % out
+        log("%s << Output" % out)
         return out
 
-class HTMBrain():
 
-    def __init__(self):
+class HTMBrain(object):
+
+    def __init__(self, columns_per_region=None):
         self.regions = []
         self.t = 0
+        self.active_behaviors = []
+        self.columns_per_region = columns_per_region
 
     def __repr__(self):
         return "<HTMBrain regions=%d>" % len(self.regions)
 
-    def initialize(self, n_regions=1, input_length=5):
-        for i in range(n_regions):
-            r = Region(self, inputs_per_region=input_length)
+    def initialize(self, r1_inputs=1):
+        n_inputs = r1_inputs
+        for cpr in self.columns_per_region:
+            r = Region(self, n_inputs=n_inputs, n_columns=cpr)
             r.initialize()
+            n_inputs = cpr  # Next region will have 1 input for each column
             self.regions.append(r)
         print "Initialized %s" % self
 
-    def process(self, input):
+    def process(self, readings, learning=False):
         print "Processing inputs in time t = %d" % self.t
-        _in = input
-        for r in self.regions:
-            out = r.step(_in)
+        _in = readings
+        for i, r in enumerate(self.regions):
+            log("Step processing for region %d\n%s << Input" % (i, _in))
+            out = r.step(_in, learning_enabled=learning)
             _in = out
+        motor_commands = out ## TODO??
+        # TODO: Merge output into commands for old brain
         self.t += 1 # Move time forward one step
-        return out
-
-if __name__ == "__main__":
-    INPUT_LEN = 10
-    DURATION = 1
-    b = HTMBrain()
-    # Run white noise
-    b.initialize(n_regions=2, input_length=INPUT_LEN)
-    for i in range(DURATION):
-        out = b.process(np.random.random_integers(0, 1, INPUT_LEN))
+        return motor_commands

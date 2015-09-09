@@ -70,3 +70,21 @@ Key questions:
 - How are the multiple levels “face neurons” generated / trained?
 - Attention?
 - Does the conversion to binary synapse weights lose something useful in biological stochastic weights? Evolutionary process? Testing variance in connections?
+
+GOAL SEEKING
+- How do we go from inference/prediction to decisions?
+- How is reward mechanism handled?
+- Is this was Numenta calls CLA Classifier (creation of values from output of TP)?
+
+Reward as sensor-based input (e.g. sensing eating that directly results in happiness)
+
+or
+
+Strongly link certain output patterns with rewards if they occur at the same time. When these output patterns are predicted, we propagate out predictions from the goal condition (pattern) until we find a currently predicted state (choice), and pursue that.  B/c reward association is so strong, goal patterns (or partial patterns) excite almost as strongly as current inputs, and so are forced to be included in present pattern recognition and prediction. Predicted patterns will therefore include result of goal state.  Or look for sequences that include both current and goal state, and then play the sequencec to produce the motor commands (cla classifier?)
+
+So, do decision points occur when partial patterns of reward (or anti-reward)-linked goal states are sensed? Otherwise, autopilot?
+
+Gambling...
+
+TODO:
+- Understand how the CLA classifier works, and if it can be used to generate motor commands

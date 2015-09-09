@@ -7,7 +7,7 @@ __copyright__   = "Copyright 2015"
 
 import numpy as np
 import math
-from hawkins_brain import HBrain
+from htm_brain import HTMBrain
 from brain import Brain
 from Tkinter import *
 from constants import *
@@ -139,7 +139,7 @@ class Sensor(object):
 
 class Agent(Drawable2D):
 
-    def __init__(self, state, sensors, behaviors, brain="standard"):
+    def __init__(self, state, brain, sensors, behaviors, columns_per_region=None):
         # Properties
         self.sensors = sensors  # List of Sensor()
         self.behaviors = behaviors  # List of Behavior()
@@ -147,15 +147,13 @@ class Agent(Drawable2D):
         # Present State
         self.state = state  # Physical state
         self.reward = 0.0  # Cumulative
+        self.active_behaviors = np.zeros(len(self.behaviors))
 
         # Graphics
         self.drawable = None
 
-        # Intel
-        if brain == 'standard':
-            self.brain = Brain(input_dim=len(self.sensors), output_dim=len(self.behaviors), n_hidden=2, hidden_dim=10)
-        elif brain == 'hawkins':
-            self.brain = HBrain(input_dim=len(self.sensors), output_dim=len(self.behaviors), n_hidden=2, hidden_dim=10)            
+        self.brain = brain
+        self.brain.initialize(r1_inputs=len(sensors)+len(behaviors))
 
         print "Created: %s" % self
 
@@ -167,8 +165,9 @@ class Agent(Drawable2D):
         Observe, think and behave for current time step
         '''
         readings = self.readSensors()
-        behavior_magnitudes = self.think(readings)
-        self.actuateBehaviors(behavior_magnitudes)
+        self.think(readings)  # Set active_behaviors as output motor commands from cortex (L5)
+        self.actuateBehaviors()
+
 
     def readSensors(self):
         readings = []
@@ -177,16 +176,20 @@ class Agent(Drawable2D):
             if s.utility != 0 and observed != 0:
                 self.gotReward(s.utility * observed)
             readings.append(observed)
+        # Add readings from behavior (to learn motor commands -> sensed outcomes)
+        readings.extend(self.active_behaviors)
         return np.array(readings)
 
 
     def think(self, readings):
-        O = self.brain.getSingleOutput(readings)
-        return np.squeeze(np.asarray(O))  # Convert to array
+        # Old brain receives motor commands from each region
+        O = self.brain.process(readings)
+        # TODO: Processing to squash each regions outputs into a single array of motor commands
+        # self.active_behaviors = np.squeeze(np.asarray(O)) # Convert to array
 
 
-    def actuateBehaviors(self, magnitudes):
-        for b, mag in zip(self.behaviors, magnitudes):
+    def actuateBehaviors(self):
+        for b, mag in zip(self.behaviors, self.active_behaviors):
             b.actuate(mag, self.state)
 
     def getReward(self):
