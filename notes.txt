@@ -88,3 +88,4 @@ Gambling...
 
 TODO:
 - Understand how the CLA classifier works, and if it can be used to generate motor commands
+- Understand how new synapses are added to distal segments in get_segment_active_synapses

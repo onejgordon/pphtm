@@ -131,6 +131,10 @@ class DriveBehavior(Behavior):
 
 
 class SimpleHeatAgent(Agent):
+    '''
+    Agent with 6 directional heat antennas and 3 behaviors
+    
+    '''
     DRAW_SIZE = 1
     DRAW_ARC = 80
 

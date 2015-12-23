@@ -11,7 +11,8 @@ import util
 
 # Settings
 
-VERBOSITY = 2
+VERBOSITY = 3
+DEF_ACTIVATION_THRESHHOLD = 1 # Activation threshold for a segment. If the number of active connected synapses in a segment is greater than activationThreshold, the segment is said to be active. 
 CONNECTED_PERM = 0.2  # If the permanence value for a synapse is greater than this value, it is said to be connected.
 MIN_OVERLAP = 2  # A minimum number of inputs that must be active for a column to be considered during the inhibition step
 DUTY_HISTORY = 1000
@@ -27,6 +28,12 @@ def log(message, level=1):
     if VERBOSITY >= level:
         print message
 
+def printarray(array, coerce_to_int=True):
+    if type(array[0]) is int or coerce_to_int:
+        return ''.join([str(int(x)) for x in array])
+    elif type(array[0]) in [float, np.float64]:
+        return '|'.join([str(int(x)) for x in array])
+
 class SegmentUpdate(object):
 
     def __init__(self, segment_index=-1, active_synapses=None, sequence=False):
@@ -37,20 +44,22 @@ class SegmentUpdate(object):
             self.active_synapses = []
         self.sequence = sequence
 
+    def __repr__(self):
+        return "<SegmentUpdate active_synapses=%d sequence=%s />" % (len(self.active_synapses), self.sequence)
 
 class Synapse(object):
     '''
     A synapse part of a dendrite segment of a column or cell
     Active if its input is active
-    Connected if permanence > threshhold
+    Connected if permanence > threshhold (if proximal, assumed connected if dital?)
     '''
 
     def __init__(self, region, source, permanence, column=None):
         self.region = region
-        self.permanence = permanence  # (0,1)
+        self.permanence = permanence  # (0,1) Only used for proximal
         # Source
         self.source = source  # Index of source input (or cell in column, if distal)
-        self.column = column  # None if proximal
+        self.column = column  # Column to which we are connected (None if proximal)
 
 
     def proximal(self):
@@ -60,18 +69,21 @@ class Synapse(object):
         return abs(self.source - location)
 
     def connected(self, connectionPermanence=CONNECTED_PERM):
-        return self.permanence > connectionPermanence
+        return self.permanence > connectionPermanence or not self.proximal()
 
     def active(self, tMinus=0, state='active'):
+        '''
+        State is how to define active (connected to learn-state cell source, or active-state cell source)
+        '''
         if self.proximal():
-            input = self.region._get_input(self.source, tMinus)
-            return input
+            return self.region._get_input(self.source, tMinus)
         else:
             # Distal
+            cell = self.column.cells[self.source]
             if state == 'active':
-                return self.column.cells[self.source]._in_active_state(tMinus)
+                return cell._in_active_state(tMinus)
             elif state == 'learn':
-                return self.column.cells[self.source]._in_learn_state(tMinus)
+                return cell._in_learn_state(tMinus)
             else:
                 raise Exception("State not allowed")
 
@@ -79,35 +91,47 @@ class Segment(object):
     '''
     Dendrite segment of column or cell
     Distal (horizontal) or proximal (feed forward)
-    TODO: How to initialize potential synapses?
+    TODO: How to initialize potential synapses for distal segments?
     '''
     def __init__(self, index, region):
         self.index = index
         self.region = region
         self.sequence = False
-        self.activation_threshhold = 1
+        self.activation_threshhold = DEF_ACTIVATION_THRESHHOLD
+        self.column = None # Set if a column's segment, otherwise cell's segment
 
-        # State
-        self.potential_synapses = []  # List of Synapse() objects.
+        # State 
+        self.potential_synapses = []  # List of Synapse() objects
 
     def __repr__(self):
         t = self.region.brain.t
-        return "<Segment potential=%d connected=%d>" % (len(self.potential_synapses), len(self.connected_synapses()))
+        return "<%s Segment index=%d potential=%d connected=%d>" % (self.print_type(), self.index, len(self.potential_synapses), len(self.connected_synapses()))
+
+    def is_proximal(self):
+        return self.column is not None
+
+    def print_type(self):
+        return "Proximal (spatial)" if self.is_proximal() else "Distal (temporal)"
 
     def initialize(self, column=None):
-        # Setup initial potential synapses
-        MAX_INIT_SYNAPSE_CHANCE = 0.5
-        MIN_INIT_SYNAPSE_CHANCE = 0.05
-        n_inputs = self.region.n_inputs
-        for source in range(n_inputs):
-            dist = abs(column.center - source)            
-            chance_of_synapse = (MAX_INIT_SYNAPSE_CHANCE * (1 - float(dist)/n_inputs)) + MIN_INIT_SYNAPSE_CHANCE
-            add_synapse = random.random() < chance_of_synapse
-            if add_synapse:
-                perm = CONNECTED_PERM + INIT_PERMANENCE_JITTER*(random.random()-0.5)
-                s = Synapse(self.region, source, perm)
-                self.potential_synapses.append(s)
-        log("Initialized %s" % self)
+        self.column = column
+        if self.is_proximal():
+            # Setup initial potential synapses for proximal segments
+            MAX_INIT_SYNAPSE_CHANCE = 0.5
+            MIN_INIT_SYNAPSE_CHANCE = 0.05
+            n_inputs = self.region.n_inputs
+            for source in range(n_inputs):
+                dist = abs(column.center - source)            
+                chance_of_synapse = (MAX_INIT_SYNAPSE_CHANCE * (1 - float(dist)/n_inputs)) + MIN_INIT_SYNAPSE_CHANCE
+                add_synapse = random.random() < chance_of_synapse
+                if add_synapse:
+                    perm = CONNECTED_PERM + INIT_PERMANENCE_JITTER*(random.random()-0.5)
+                    s = Synapse(self.region, source, perm)
+                    self.potential_synapses.append(s)
+        log_message = "Initialized %s" % self
+        if column:
+            log_message += " for %s" % column
+        log(log_message)
 
     def active(self, tMinus, state='active'):  # state in ['active','learn']
         '''
@@ -117,6 +141,7 @@ class Segment(object):
         learnState.
         '''
         n_active = len(self.active_synapses(tMinus, state=state))
+        # log("%d active of %d synapses on %s" % (n_active, len(self.connected_synapses()), self))
         return n_active > self.activation_threshhold
 
     def active_synapses(self, tMinus, state='active', connectionPermanence=CONNECTED_PERM):
@@ -130,10 +155,20 @@ class Segment(object):
         Return SegmentUpdate() object
         '''
         active_synapses = self.active_synapses(tMinus)
-        n_new_synapses = NEW_SYNAPSE_COUNT - len(active_synapses) if new_synapses else 0
-        if n_new_synapses > 0:
-            learn_synapses = self.active_synapses(tMinus, state='learn')
-            active_synapses.extend(random.sample(learn_synapses, min(len(learn_synapses), n_new_synapses)))
+        n_new_synapses = 0
+        if new_synapses:
+            n_new_synapses = NEW_SYNAPSE_COUNT - len(active_synapses)
+        if n_new_synapses:
+            # TODO: is this right? We want to add synapses from a pool of 
+            # cells that are in learn-state, but this may filter to existing connections, which aren't used
+            # in distal segments
+            learn_cell_pool = self.region._cells_in_learn_state(tMinus=tMinus)
+            learn_cells = random.sample(learn_cell_pool, min(len(learn_cell_pool), n_new_synapses))
+            for c in learn_cells:
+                perm = 0 # ??
+                s = Synapse(self.region, c.index, perm, column=self.region.columns[c.col_index])
+                active_synapses.append(s)
+            log("Adding %d new learned synapses (now %d active) on %s" % (len(learn_cells), len(active_synapses), self))
         return SegmentUpdate(segment_index=self.index, active_synapses=active_synapses, sequence=False)
 
 class Cell(object):
@@ -149,6 +184,10 @@ class Cell(object):
         self.segments = [Segment(s, self.region) for s in range(n_segments)]
 
         self.segment_update_list = []  # List of SegmentUpdate() objects
+        log("Initialized %s" % self)
+
+    def __repr__(self):
+        return "<Cell index=%d column=%d />" % (self.index, self.col_index)
 
     def _in_active_state(self, tMinus=0):
         present = self.region.brain.t
@@ -171,6 +210,7 @@ class Cell(object):
         self.region.predictive_state[self.col_index][self.index][present] = 1
 
     def _set_learn_state(self):
+        log("_set_learn_state of cell %d in column %d" % (self.index, self.col_index))
         present = self.region.brain.t
         self.region.learn_state[self.col_index][self.index][present] = 1
 
@@ -248,6 +288,8 @@ class Column(object):
         self.recent_active_duty = []  # After inhibition, list of bool
         self.recent_overlap_duty = []  # Overlap > minOverlap, list of bool
 
+    def __repr__(self):
+        return "<Column index=%d />" % (self.index)
 
     def initialize(self):
         for c in range(self.region.cells_per_column):
@@ -319,7 +361,7 @@ class Region(object):
     Made up of many columns
     '''
 
-    def __init__(self, brain, desired_local_activity=5, permanence_inc=0.1, permanence_dec=0.1, n_columns=10, cells_per_column=3, n_inputs=20):
+    def __init__(self, brain, desired_local_activity=5, permanence_inc=0.1, permanence_dec=0.1, n_columns=10, cells_per_column=5, n_inputs=20):
         self.brain = brain
 
         # Region constants (spatial)
@@ -357,6 +399,21 @@ class Region(object):
 
     def __str__(self):
         return "<Region inputs=%d/>" % self.n_inputs
+
+    def print_columns(self):
+        for i in range(self.cells_per_column):
+            out = ""            
+            for col in self.columns:
+                cell = col.cells[i]
+                symbol = "."
+                if cell._in_learn_state():
+                    symbol = "L"
+                elif cell._in_predictive_state():
+                    symbol = "P"
+                elif cell._in_active_state():
+                    symbol = "A"
+                out += symbol
+            log(out)
 
     def initialize(self):
         # Create columns & get neighbors
@@ -424,6 +481,9 @@ class Region(object):
         # At most recent time step (t=-1)
         return filter(lambda c : bool(self.active_columns[-1][c.index]), self.columns)
 
+    def _cells_in_learn_state(self, tMinus=0):
+        # TODO: get slice of learn state at tMinus
+        return self.learn_state[self.col_index][self.index][present - tMinus]
 
     ##################
     # Spatial Pooling
@@ -442,7 +502,7 @@ class Region(object):
                 overlaps[c] = 0
             else:
                 overlaps[c] = overlaps[c] * self.boost[c]
-        log("Overlap: %s" % overlaps, level=3)
+        log("%s << Overlap" % printarray(overlaps), level=3)
         return overlaps
 
     def do_inhibition(self):
@@ -541,16 +601,19 @@ class Region(object):
                 # ...and add a segment to this cell
                 sUpdate = c.segments[seg_index].get_segment_active_synapses(-1, new_synapses=True)
                 sUpdate.sequence = True
+                log(sUpdate)
                 c.segment_update_list.append(sUpdate)
 
     # Phase 2
     def do_predictive_state(self):
+        log("Predictive state...", level=2)
         t = self.brain.t
         output = np.zeros(len(self.columns))
         for i, col in enumerate(self.columns):
             for cell in col.cells:
                 for seg in cell.segments:
                     if seg.active(t):
+                        log("%s is active" % seg)
                         cell._set_predictive_state()
                         
                         activeUpdate = seg.get_segment_active_synapses()
@@ -561,6 +624,8 @@ class Region(object):
                         cell.segment_update_list.append(predUpdate)
                     
                 # TODO: Is output calculation right, boolean OR of any predictive/active cell makes column output 1?
+                if cell._in_predictive_state():
+                    log("!! IN PREDICTIVE!")
                 if cell._in_predictive_state() or cell._in_active_state():
                     output[i] = 1
         
@@ -591,6 +656,8 @@ class Region(object):
         # Phase 2: Predictive state    
         out = self.do_predictive_state()
 
+        self.print_columns()
+
         # Phase 3: Learning
         if learning_enabled:
             self.do_update_synapses()
@@ -611,9 +678,9 @@ class Region(object):
         self.learn_state = np.dstack((self.active_state, np.zeros((self.n_columns, self.cells_per_column))))                
         
         self.spatial_pooling(learning_enabled=learning_enabled)  # Calculates active columns
-        log("%s << Active columns" % self.active_columns[-1])
+        log("%s << Active columns" % printarray(self.active_columns[-1]))
         out = self.temporal_pooling(learning_enabled=learning_enabled)
-        log("%s << Output" % out)
+        log("%s << Output (active or predictive?)" % printarray(out))
         return out
 
 
@@ -641,7 +708,7 @@ class HTMBrain(object):
         print "Processing inputs in time t = %d" % self.t
         _in = readings
         for i, r in enumerate(self.regions):
-            log("Step processing for region %d\n%s << Input" % (i, _in))
+            log("Step processing for region %d\n%s << Input" % (i, printarray(_in)))
             out = r.step(_in, learning_enabled=learning)
             _in = out
         motor_commands = out ## TODO??
