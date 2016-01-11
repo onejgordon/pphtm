@@ -37,6 +37,17 @@ def inside(pos, bound_pos, bound_shape):
     else:
         return False
 
+def coords_from_index(index, side_len):
+    '''Convert integer index into 2d coords (x,y)'''
+    y = int(index / side_len)
+    x = index % side_len
+    return (x,y)
+
+def dist_from_indexes(index1, index2, side_len):
+    loc1 = coords_from_index(index1, side_len)
+    loc2 = coords_from_index(index2, side_len)
+    return distance(loc1, loc2)
+
 def rotation_matrix(axis, theta):
     """
     Return the rotation matrix associated with counterclockwise rotation about

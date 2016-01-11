@@ -10,12 +10,12 @@ import numpy as np
 WORLD_SIDE_LEN = 30
 
 def main():
-	game = SimpleHeatGame(animate=False, timeout=50)
+	game = SimpleHeatGame(animate=True, timeout=50)
 
 	world = SimpleHeatWorld([WORLD_SIDE_LEN, WORLD_SIDE_LEN])
 	world.addSource(SimpleHeatSource(1.5,[5,5], heat=5))
 
-	brain = HTMBrain(columns_per_region=[20,10,5])            
+	brain = HTMBrain(columns_per_region=[20,10,3])  
 	agent = SimpleHeatAgent(world, brain)
 
 	game.setWorld(world)

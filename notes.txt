@@ -1,5 +1,7 @@
 CODE
 
+"90% of the challenge is choosing the right problem to solve." -Jeff
+
 Place human in middle of a SimpleHeatGame.
 
 They see data from 6 sensors, e.g. a uniform heat across their front directional sensors, but sense no heat at current location. What aspects of higher-level state/memory are needed to make the right decisions?
@@ -29,8 +31,6 @@ High level patterns / structures to learn:
 NEXT: 
 - How do we notice patterns that include temporarly component?
 - Some sort of register to maintains high-level (or multilevel) patterns that we've seen recently?
-- Neuron memory? Investigate theories on memory.
-- Finish Cortical Learning Algorithm and implement
 
 
 
@@ -48,7 +48,7 @@ Humans:
 
 Random:
 - Could higher-level planning be artificially producing memory to recall along the way? Ah, I’m in a pattern “ABC” and I remember / match “ABCD” (my plan), so next step is D.
-
+- All HTM is generally pattern recognition and temporal prediction. But what if the temporal is over-emphasized. What if instead time is a factor, but predictions of future steps are an innate result of completion of a pattern, for which we can only fill in past and present events, so to complete the pattern, we must extrapolate future points?
 
 Processing:
 At any given moment in time, we fit multiple patterns potentially across multiple levels of hierarchy, against our memory. Schrodinger’s cat? All fits are equally true. Are some mutually exclusive, and some complementary? Perhaps separated by different levels of hierarchy? Hierarchy may provide for higher level analysis that enables longer-term temporal patterns, or higher level analysis such as ‘face in view’. These fitted patterns may be incomplete and can be extrapolated/interpolated to do things like fill in gaps in an image, or make assumptions about repetitions, or guess states in the future. We continue to verify that the patterns we’re in are unchanging (confirming we’re observing reality), until something unexpected/unpredicted happens. When this happens strongly enough, we look for other patterns to explain the difference. If no other patterns explain the new direction, we begin to update our network to strengthen the new pattern and remember it. We don’t know any patterns until we see them repeatedly (and perhaps from different ‘angles’? invariance confirming reality?)
@@ -67,8 +67,7 @@ How does reward work? Perhaps some patterns get associated with reward (are exci
 Perhaps planning is formulating a goal and then choosing patterns that result in that goal.
 
 Key questions:
-- How are the multiple levels “face neurons” generated / trained?
-- Attention?
+- Attention? Thalamus?
 - Does the conversion to binary synapse weights lose something useful in biological stochastic weights? Evolutionary process? Testing variance in connections?
 
 GOAL SEEKING
@@ -80,12 +79,77 @@ Reward as sensor-based input (e.g. sensing eating that directly results in happi
 
 or
 
-Strongly link certain output patterns with rewards if they occur at the same time. When these output patterns are predicted, we propagate out predictions from the goal condition (pattern) until we find a currently predicted state (choice), and pursue that.  B/c reward association is so strong, goal patterns (or partial patterns) excite almost as strongly as current inputs, and so are forced to be included in present pattern recognition and prediction. Predicted patterns will therefore include result of goal state.  Or look for sequences that include both current and goal state, and then play the sequencec to produce the motor commands (cla classifier?)
+Strongly link certain output patterns with rewards if they occur at the same time. When these output patterns are predicted, we propagate out predictions from the goal condition (pattern) until we find a currently predicted state (choice), and pursue that.  B/c reward association is so strong, goal patterns (or partial patterns) excite almost as strongly as current inputs, and so are forced to be included in present pattern recognition and prediction. Predicted patterns will therefore include result of goal state.  Or look for sequences that include both current and goal state, and then play the sequencec to produce the motor commands (reconstruction?)
 
 So, do decision points occur when partial patterns of reward (or anti-reward)-linked goal states are sensed? Otherwise, autopilot?
 
 Gambling...
 
 TODO:
-- Understand how the CLA classifier works, and if it can be used to generate motor commands
+- Understand how the CLA classifier works, and if it can be used to generate motor commands (Done, can't)
 - Understand how new synapses are added to distal segments in get_segment_active_synapses
+
+Prediction:
+- Cicading across the branches of a tree, knowing there's a bird pirched on one branch since you saw it fly towards the tree. Brain should have constructed a spatial pattern of a tree with a bird on one branch, and predicts therefore that future cicades will complete this pattern. Separately, brain is trained on a sequential temporal pattern (bird flies to tree, then pirches on a branch). We witnessed flying towards tree, so are now anticipating seeing the bird pirched on a branch. Couldn't these be the same mechanism, and not two separate pattern extrapolations (spatial and temporal)?
+
+Can HTM be simplified -- we see part of a pattern, and we light up all possible completions of the pattern (whether spatial or temporal, and perhaps weighted by probability)
+
+Is time not special?
+
+Or is time accounted for by non-binary nature of neuron firing? Die out? If states are influenced by recent neuron fires (magnitude proxy for how long ago), perhaps temporal patterns could be acquired. If we have simple neurons that respond to notes A, B, C, D, and neuron firing is scalar and temporal, then if we see A(10), B(8), C(6), D(4), this would imply a recent decrease D->C->B->A, and could fire an SDR for decrease... In this way, even a single snapshot can contain temporal data.
+
+Major missing pieces / unknowns (Jeff):
+- Sensori-motor inference
+- Clock / timing
+- Specific timing (beats on 5 seconds)
+- How neocortex interacts with other regions
+
+
+
+
+Spatial
+
+For a single column in region 2.
+O is connected synapse
+-O---OX---O--OOX-X-X 
+
+In order for the continuous activation model to be helpful, we need to be able to distinguish between inputs like A(10), B(8), C(6) vs A(6), B(8), C(10) (which would represent sequences CBA and ABC respectively). Doesn't this require a range detector, not a simple threshhold? We need to identify that A is > X but not more than 7. What abour partial pattern matches? If each cell burns out at a different rate, than after an SDR fire, parts of the pattern will diminish over time, even with boolean activations. But now we have to differentiate between patterns diminished by time, and by spatial exposure (or do we?) What's the difference in reaction to a partial pattern exposed now, vs a partial or complete pattern exposed at t-x? Do we always fire expectations of the full pattern on exposure? Perhaps time diminishing occurs across the entire pattern, whereas partial pattern exposure is spatially limited, e.g. time diminished: 40% of all pattern cells firing, partial exposure: 80% of cells in one spatial quadrant. 
+
+If so, we may have a class of cells that reach across many spatial parts of a pattern, which would be capable of detecting a time-diminished pattern, as well as cells that have a smaller receptive area and detect spatial pieces of a pattern. The former would continue to fire at different levels of time diminishment (a proxy for the amount of time that has passed since a pattern was fired), and the latter would be interpreted as present exposure to a part of a pattern. For this to work, it would have to be unlikely for us to experience a spatially distributed partial pattern on current exposure.
+
+If fade-out speeds vary cell to cell, and certain cells in the SDR are prioritized or 'core', and therefore die out slower (due to importance), then inhibitory synapses from the non-core cells, and excitatory synapses from the core cells will allow us to detect faded patterns (historical, diminished), which will enable our temporal-spatial recognitino of time series.
+
+Thiw would allow a higher level SDR to detect both combined spatial patterns as well as sequences, e.g. part of B + D, or C then D
+
+A single region will only be able to detect a duration of sequence defined by the slowest burnout rate, but since each region can detect its own subsequence, with multiple layers of hierarchy long sequences can be learned.
+
+R1 learns 'C' (and other letters)
+R2 learns 'CAT', 'HER' (and other short sequences)
+R3 learns 'CAT-HER-INE' and can therefore predict INE when it sees CAT-HER
+
+
+
+PROBLEM: Currently inhibition causes even died out cells to be selected, which makes it hard to use relative activation as a pattern. Continuity therefore may not be useful, but different die out rates for peripheries of a pattern can still work.
+
+Perhaps distal dendrites within a region serve to validate the role each cell plays in the pattern. Well connected cells could be considered core to the pattern (always seen together), and less connected cells are still part of the pattern, but may not always be present, are more peripheral. If we tie die-out rate to the level of connectedness, we can allow core cells to remain active for longer, which should enable temporal detection.
+
+New problem: How do we weed out small differences in sequences with this approach? Is CAT different enough from CXAT?
+
+It's intuitive that if we know visual neurons learn to identify things like corners and edges, and I believe they also match motion left, right, etc. If we have input neurons that fire with left-ward motion (which is inherently temporal), why would there not also be higher level regions that handle more complex groups of motions. Couldn't the lowest level motion detection be learned spatially? Or how else could it be learned?
+
+TODO: See if we can implement this in a way that can detect temporal patterns without the temporal pooler. Read text and identify words? Ensure that cells that always fire within a higher level SDR are given weight, cool slower.
+
+TODO: Do letter pattern rec with much smaller input space
+
+TODO: Ball bounce as inputs, see if we can match high level SDRs with motion up-right, down-left, etc. and predict next location of ball.
+
+How do we implement feedback? A top-down prediction or confirmation of lower-level patterns? Could feedback from higher regions prime lower cells into firing? Could we monitor this priming to get a prediction (both temporal and spatial)? How are feedback connections reinforced, learned?
+
+Prediction: cicade speed related somehow to neuron burnout speed (retain full pattern in memory during cicades across an image)
+
+----------
+
+Need to be able to form a invariant representation of stable change (e.g. steadily increasing volume, light). Perhaps changes/diffs are the the focus rather than spatial patterns? Would make sense -- we should be less interested in unchanging patterns.
+
+Ordinal vs time-grouped sequences -- is differentiation needed? Can time-grouping be handled just spatially with burn-outs? Illuminate A, C and B in close succession, and a higher-region linked to the long-lasting cells in ABC will fire, regardless of order.
+If we have higher-regions inhibited by the peripheral (fast burnout) cells in A, and the core of B and C, it will fire in response to a transition from A -> B/C, C/B.

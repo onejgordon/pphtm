@@ -2,14 +2,25 @@
 import sys
 from os import path
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
-from htm_brain import HTMBrain
-import numpy as np
+import util
 
-INPUT_LEN = 5
-DURATION = 1
-LEARNING = True
-b = HTMBrain(columns_per_region=[30,10,5])            
-# Run white noise
-b.initialize(r1_inputs=INPUT_LEN)
-for i in range(DURATION):
-    out = b.process(np.random.choice(2, INPUT_LEN), learning=LEARNING)
+def testUtils():
+	x, y = util.coords_from_index(3, 10)
+	assert x == 3
+	assert y == 0
+	x, y = util.coords_from_index(14, 10)
+	assert x == 4
+	assert y == 1
+	x, y = util.coords_from_index(0, 10)
+	assert x == 0
+	assert y == 0
+
+
+
+def main():
+	testUtils()
+
+
+if __name__ == "__main__":
+    main()
+

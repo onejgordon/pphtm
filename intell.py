@@ -116,7 +116,8 @@ class Behavior(object):
         '''
         Override
         '''
-        print "%s (%s, state: %s)" % (self.nickname, magnitude, state)
+        if magnitude:
+            print "%s (%s, state: %s)" % (self.nickname, magnitude, state)
 
 class Sensor(object):
     '''
@@ -168,7 +169,6 @@ class Agent(Drawable2D):
         self.think(readings)  # Set active_behaviors as output motor commands from cortex (L5)
         self.actuateBehaviors()
 
-
     def readSensors(self):
         readings = []
         for s in self.sensors:
@@ -183,9 +183,10 @@ class Agent(Drawable2D):
 
     def think(self, readings):
         # Old brain receives motor commands from each region
-        O = self.brain.process(readings)
+        out = self.brain.process(readings)
         # TODO: Processing to squash each regions outputs into a single array of motor commands
-        # self.active_behaviors = np.squeeze(np.asarray(O)) # Convert to array
+        print "Out", out
+        self.active_behaviors = np.squeeze(np.asarray(out)) # Convert to array
 
 
     def actuateBehaviors(self):
