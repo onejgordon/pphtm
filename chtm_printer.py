@@ -4,7 +4,9 @@ from Tkinter import *
 import math
 import util
 
-REGION_BUFFER = 50
+REGION_BUFFER = 30
+INHIBITION_RADIUS_BAR_HEIGHT = 3
+INHIBITION_RADIUS_BAR_BUFFER = 10
 CELL_PX = 10
 
 class CHTMPrinter(object):
@@ -43,6 +45,7 @@ class CHTMPrinter(object):
             if rc.region:
                 activations = [cell.activation for cell in rc.region.cells]
                 rc.render_cells(activations)
+                rc.render_inhibition_radius()
             elif inputs is not None:
                 # Inputs
                 rc.render_cells(inputs)
@@ -57,6 +60,9 @@ class RegionCanvas(object):
         self.canvas = canvas
         self.region = region
 
+    def render_inhibition_radius(self):
+        self.canvas.create_rectangle(self.x, self.y - INHIBITION_RADIUS_BAR_BUFFER, self.x + self.region.inhibition_radius * CELL_PX, self.y - INHIBITION_RADIUS_BAR_BUFFER + INHIBITION_RADIUS_BAR_HEIGHT, fill="#000000")
+
     def render_bg(self):
         color = "#CCCCCC" if self.region else "#EFEFEF"
         self.canvas.create_rectangle(self.x, self.y, self.x + self.side * CELL_PX, self.y + self.side*CELL_PX, fill=color)
@@ -69,6 +75,8 @@ class RegionCanvas(object):
         if self.region:
             r = int(activation * 255)
             g = b = 0
+            if activation == 1.0:
+                g = 180
         else:
             b = int(activation * 255)
             g = r = 0

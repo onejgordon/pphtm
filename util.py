@@ -16,8 +16,11 @@ def circleCorners(center, radius):
     return [tl_x, tl_y, br_x, br_y]
 
 def average(li):
-    li = [x for x in li if x is not None]
-    return sum(li) / len(li)
+    if len(li):
+        li = [x for x in li if x is not None]
+        return sum(li) / len(li)
+    else:
+        return 0
 
 def toScreen(arr, resolution=30):
     return [j * resolution for j in arr]

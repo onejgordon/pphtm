@@ -153,3 +153,9 @@ Need to be able to form a invariant representation of stable change (e.g. steadi
 
 Ordinal vs time-grouped sequences -- is differentiation needed? Can time-grouping be handled just spatially with burn-outs? Illuminate A, C and B in close succession, and a higher-region linked to the long-lasting cells in ABC will fire, regardless of order.
 If we have higher-regions inhibited by the peripheral (fast burnout) cells in A, and the core of B and C, it will fire in response to a transition from A -> B/C, C/B.
+
+
+
+SUCCESSES
+
+Our CHTM without a temporal pooler (spatial learning only), can correctly learn the sequences ABC and BAC with a training set of 150 characters, 9 encoded inputs, and 2 100-cell regions)

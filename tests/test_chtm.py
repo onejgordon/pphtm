@@ -15,14 +15,15 @@ from nupic.encoders.scalar import ScalarEncoder
 
 class FileProcesser(object):
 
-    ALPHA = "ABC"
-    CROP_FILE = 150
+    ALPHA = "ABCDEF"
+    CROP_FILE = 200
     N_INPUTS = 36
     AUTO_PREDICT = 0
+    CPR = [11**2]
 
-    def __init__(self, filename="simple_pattern.txt", step=False, with_classifier=True, delay=50, animate=True):
+    def __init__(self, filename="simple_pattern2.txt", step=False, with_classifier=True, delay=50, animate=True):
         self.step = step
-        self.b = CHTMBrain(cells_per_region=[10**2,10**2], min_overlap=1, r1_inputs=self.N_INPUTS) 
+        self.b = CHTMBrain(cells_per_region=self.CPR, min_overlap=1, r1_inputs=self.N_INPUTS) 
         self.b.initialize()
         self.printer = CHTMPrinter(self.b)
         self.printer.setup()
@@ -30,7 +31,7 @@ class FileProcesser(object):
         self.animate = animate
         self.delay = delay
         if with_classifier:
-            self.classifier = CHTMClassifier(self.b, categories=self.ALPHA, region_index=1, history_window=500)
+            self.classifier = CHTMClassifier(self.b, categories=self.ALPHA, region_index=len(self.CPR)-1, history_window=500)
 
         self.encoder = ScalarEncoder(n=self.N_INPUTS, w=5, minval=1, maxval=self.N_INPUTS, periodic=False, forced=True)
 
@@ -68,7 +69,7 @@ class FileProcesser(object):
         else:
             while True:            
                 user_char = raw_input("Enter a letter to see prediction at t+1... (! to exit) >> ")
-                if not user_char:
+                if user_char == "!":
                     break
                 else:
                     inputs = self.encode_letter(user_char)
@@ -79,12 +80,12 @@ class FileProcesser(object):
         self.printer.window.destroy()
 
 
-
     def process(self):
         if self.cursor < self.CROP_FILE or not self.CROP_FILE:
             if self.step:
                 user_val = raw_input("Press enter to step, anything else to quit...")
                 if user_val:
+                    self.printer.window.destroy()
                     return
             self.cursor += 1
             char = self.data[self.cursor].upper()
