@@ -46,6 +46,15 @@ def coords_from_index(index, side_len):
     x = index % side_len
     return (x,y)
 
+def index_from_coords(x, y, side_len):
+    return int((y * side_len) + x)
+
+def normalize(array):
+    _max = max(array)
+    if _max != 0:
+        return [x/_max for x in array]
+    return array
+
 def dist_from_indexes(index1, index2, side_len):
     loc1 = coords_from_index(index1, side_len)
     loc2 = coords_from_index(index2, side_len)

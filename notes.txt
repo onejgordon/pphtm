@@ -159,3 +159,5 @@ If we have higher-regions inhibited by the peripheral (fast burnout) cells in A,
 SUCCESSES
 
 Our CHTM without a temporal pooler (spatial learning only), can correctly learn the sequences ABC and BAC with a training set of 150 characters, 9 encoded inputs, and 2 100-cell regions)
+
+CHTM with distal and proximal segments, excitatory & inhibitory cells, 1 10x10 region over 500 repetitions, is able to learn ABCD vs EBCF (higher order temporal learning)
