@@ -22,6 +22,8 @@
 # We can't have all cells in SDR learn the same way or we wont produce
 # unique pattern detectors that can detect multiple longer-term pattersn
 # Pick learners randomly?
+
+# >> TOdo my efficiency changes in effiency branch lost value. What changes?
 # -----------------------
 
 import numpy as np

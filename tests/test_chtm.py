@@ -12,7 +12,7 @@ from nupic.encoders.scalar import ScalarEncoder
 class FileProcesser(object):
 
     ALPHA = "ABCDEF"
-    CROP_FILE = 500
+    CROP_FILE = 800
     N_INPUTS = 36
     CPR = [10**2]
     auto_predict = 16
@@ -102,6 +102,16 @@ class FileProcesser(object):
                     inputs = self.encode_letter(prediction)
                     self.b.process(inputs, learning=False)
                 print "Predicted: %s" % predicted_stream
+                done = False
+                while not done:
+                    next = raw_input("Enter next letter (q to exit) >> ")
+                    done = next.upper() == 'Q'
+                    if done:
+                        break
+                    inputs = self.encode_letter(next)
+                    self.b.process(inputs, learning=False)
+                    prediction = self.classifier.predict(k=1)
+                    print "Prediction: %s" % prediction
             else:
                 while True:            
                     user_char = raw_input("Enter a letter to see prediction at t+1... (! to exit) >> ")
