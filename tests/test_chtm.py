@@ -12,12 +12,12 @@ from nupic.encoders.scalar import ScalarEncoder
 class FileProcesser(object):
 
     ALPHA = "ABCDEF"
-    CROP_FILE = 800
+    CROP_FILE = 500
     N_INPUTS = 36
-    CPR = [10**2]
+    CPR = [8**2]
     auto_predict = 16
 
-    def __init__(self, filename="simple_pattern2.txt", with_classifier=True, delay=50, animate=True):
+    def __init__(self, filename="simple_pattern.txt", with_classifier=True, delay=50, animate=True):
         self.b = CHTMBrain(cells_per_region=self.CPR, min_overlap=1, r1_inputs=self.N_INPUTS) 
         self.b.initialize()
         self.printer = CHTMPrinter(self.b)
@@ -71,7 +71,7 @@ class FileProcesser(object):
                     self.classifier.read(char)
 
                 if self.animate:
-                    self.printer.render(inputs=inputs)
+                    self.printer.render()
             else:
                 # Get user input for next batch
                 self.current_batch_counter = 0
