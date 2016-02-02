@@ -9,7 +9,7 @@ REGION_BUFFER = 20
 HIGHLIGHT_DELAY = 3000
 INHIBITION_RADIUS_BAR_HEIGHT = 3
 INHIBITION_RADIUS_BAR_BUFFER = 10
-CELL_PX = 10
+CELL_PX = 15
 OUTLINE_COLOR = "#555555"
 VIEWABLE_SEGMENTS = 5
 
@@ -34,7 +34,10 @@ class VIEW():
 
     @staticmethod
     def activation_value(region, index):
-        return region.cells[index].activation
+        '''
+        Activation from this time step (before learning)
+        '''
+        return region.last_activation[index]
 
     @staticmethod
     def overlap_value(region, index):
@@ -57,6 +60,14 @@ class VIEW():
     # Label functions
 
     @staticmethod
+    def activating_now(region, index):
+        '''
+        Cells activated by current time step
+        '''
+        activating = region.cells[index].activation == 1.0
+        return "A" if activating else ""
+
+    @staticmethod
     def synapse_change(cell, index, segment_index=0):
         if segment_index < len(cell.distal_segments):
             seg = cell.distal_segments[segment_index]
@@ -73,7 +84,7 @@ class VIEW():
         return None
 
     @staticmethod
-    def label(index):
+    def label(region, index):
         return ""
 
     DRAW = [ACTIVATION, OVERLAP, BIAS]
@@ -86,7 +97,7 @@ VALUE_FN = {
 }
 
 LABEL_FN = {
-    VIEW.ACTIVATION: VIEW.label,
+    VIEW.ACTIVATION: VIEW.activating_now,
     VIEW.OVERLAP: VIEW.label,
     VIEW.BIAS: VIEW.label,
 }
@@ -124,7 +135,7 @@ class CHTMPrinter(object):
             side = r._cell_side_len()
             for view_index, view_type in enumerate(VIEW.DRAW):
                 value_fn = partial(VALUE_FN.get(view_type), r)
-                label_fn = LABEL_FN.get(view_type)
+                label_fn = partial(LABEL_FN.get(view_type), r)
                 on_cell_click = partial(self.focus_cell, r)
                 cg = CellGrid(x + REGION_BUFFER, y, r.n_cells, canvas=self.canvas, window=self.window, view_type=view_type, cell_value_fn=value_fn, cell_label_fn=label_fn, on_cell_click=on_cell_click)
                 if cg.side > max_side:
@@ -137,7 +148,7 @@ class CHTMPrinter(object):
                     max_height = y
                 y += REGION_BUFFER
             x = _x + REGION_BUFFER
-        
+
         self.canvas.config(width=x+REGION_BUFFER, height=max_height+REGION_BUFFER)
         self.canvas.pack()
 
@@ -170,6 +181,7 @@ class CHTMPrinter(object):
         for si, cg in enumerate(self.focus_grids):
             cg.cell_value_fn = partial(VIEW.cell_connections, cell, segment_index=si)
             cg.cell_label_fn = partial(VIEW.synapse_change, cell, segment_index=si)
+            cg.render()
 
 class CellGrid(object):
     '''
@@ -237,7 +249,7 @@ class CellGrid(object):
         x, y = self._cell_position(index)
         x += CELL_PX / 2
         y += CELL_PX / 2
-        t = self.canvas.create_text((x, y), text=text, fill="#FFFFFF", font=("Purisa", 8))
+        t = self.canvas.create_text((x, y), text=text, fill="#FFFFFF", font=("Purisa", 7))
         self.temporary_widgets.append(t)
         return t
 

@@ -14,11 +14,11 @@ class FileProcesser(object):
     ALPHA = "ABCDEF"
     CROP_FILE = 500
     N_INPUTS = 36
-    CPR = [8**2]
+    CPR = [10**2]
     auto_predict = 16
 
-    def __init__(self, filename="simple_pattern.txt", with_classifier=True, delay=50, animate=True):
-        self.b = CHTMBrain(cells_per_region=self.CPR, min_overlap=1, r1_inputs=self.N_INPUTS) 
+    def __init__(self, filename="simple_pattern2.txt", with_classifier=True, delay=50, animate=True):
+        self.b = CHTMBrain(cells_per_region=self.CPR, min_overlap=1, r1_inputs=self.N_INPUTS)
         self.b.initialize()
         self.printer = CHTMPrinter(self.b)
         self.printer.setup()
@@ -35,7 +35,7 @@ class FileProcesser(object):
         with open(filename, 'r') as myfile:
             self.data = myfile.read()
 
-        self.cursor = 0    
+        self.cursor = 0
 
     def encode_letter(self, c):
         if True:
@@ -113,7 +113,7 @@ class FileProcesser(object):
                     prediction = self.classifier.predict(k=1)
                     print "Prediction: %s" % prediction
             else:
-                while True:            
+                while True:
                     user_char = raw_input("Enter a letter to see prediction at t+1... (! to exit) >> ")
                     if user_char == "!":
                         break
