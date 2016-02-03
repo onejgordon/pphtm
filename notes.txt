@@ -28,7 +28,7 @@ High level patterns / structures to learn:
 - Left heat, followed by turning left and driving followed by good
 - Present heat followed by less heat followed by less heat followed by loss of good (consumed resource)
 
-NEXT: 
+NEXT:
 - How do we notice patterns that include temporarly component?
 - Some sort of register to maintains high-level (or multilevel) patterns that we've seen recently?
 
@@ -43,8 +43,8 @@ Intelligence
 - Auto-association
 
 Humans:
-- Probably born with curiosity, which guarantees exposure to many patterns, which enables learning. How do you program software with curiosity?  
-- 
+- Probably born with curiosity, which guarantees exposure to many patterns, which enables learning. How do you program software with curiosity?
+-
 
 Random:
 - Could higher-level planning be artificially producing memory to recall along the way? Ah, I’m in a pattern “ABC” and I remember / match “ABCD” (my plan), so next step is D.
@@ -60,7 +60,7 @@ We rate the level of fit with each pattern that looks familiar
 Should autonomously generated behaviors be part of this pattern recognition, or separate inputs? Could a layer of pattern identification be “i’m moving forward as I see the circle in front of me get bigger” such that we can easily extrapolate this to “if i keep moving forward the circle will continue to grow”
 
 Synthesized:
-- Brains are at the most basic level multi-level, fuzzy pattern recognizers and inter/extrapolaters. We can interpolate patterns when complete information isn’t available (guessing what we’re looking at / hearing), and extrapolate incomplete patterns, for example incomplete temporal sequences (predictions of the future). These are the same process, not different. 
+- Brains are at the most basic level multi-level, fuzzy pattern recognizers and inter/extrapolaters. We can interpolate patterns when complete information isn’t available (guessing what we’re looking at / hearing), and extrapolate incomplete patterns, for example incomplete temporal sequences (predictions of the future). These are the same process, not different.
 
 How does reward work? Perhaps some patterns get associated with reward (are excited together). If we are in these patterns that associate to reward, we likely feel some low-level reward. Then we try to complete the pattern to redeem the full reward? Do we automatically try to complete patterns linked to reward, and avoid those linked to negative reward (e.g. pain)? Or is there a higher level decision process.
 
@@ -111,9 +111,9 @@ Spatial
 
 For a single column in region 2.
 O is connected synapse
--O---OX---O--OOX-X-X 
+-O---OX---O--OOX-X-X
 
-In order for the continuous activation model to be helpful, we need to be able to distinguish between inputs like A(10), B(8), C(6) vs A(6), B(8), C(10) (which would represent sequences CBA and ABC respectively). Doesn't this require a range detector, not a simple threshhold? We need to identify that A is > X but not more than 7. What abour partial pattern matches? If each cell burns out at a different rate, than after an SDR fire, parts of the pattern will diminish over time, even with boolean activations. But now we have to differentiate between patterns diminished by time, and by spatial exposure (or do we?) What's the difference in reaction to a partial pattern exposed now, vs a partial or complete pattern exposed at t-x? Do we always fire expectations of the full pattern on exposure? Perhaps time diminishing occurs across the entire pattern, whereas partial pattern exposure is spatially limited, e.g. time diminished: 40% of all pattern cells firing, partial exposure: 80% of cells in one spatial quadrant. 
+In order for the continuous activation model to be helpful, we need to be able to distinguish between inputs like A(10), B(8), C(6) vs A(6), B(8), C(10) (which would represent sequences CBA and ABC respectively). Doesn't this require a range detector, not a simple threshhold? We need to identify that A is > X but not more than 7. What abour partial pattern matches? If each cell burns out at a different rate, than after an SDR fire, parts of the pattern will diminish over time, even with boolean activations. But now we have to differentiate between patterns diminished by time, and by spatial exposure (or do we?) What's the difference in reaction to a partial pattern exposed now, vs a partial or complete pattern exposed at t-x? Do we always fire expectations of the full pattern on exposure? Perhaps time diminishing occurs across the entire pattern, whereas partial pattern exposure is spatially limited, e.g. time diminished: 40% of all pattern cells firing, partial exposure: 80% of cells in one spatial quadrant.
 
 If so, we may have a class of cells that reach across many spatial parts of a pattern, which would be capable of detecting a time-diminished pattern, as well as cells that have a smaller receptive area and detect spatial pieces of a pattern. The former would continue to fire at different levels of time diminishment (a proxy for the amount of time that has passed since a pattern was fired), and the latter would be interpreted as present exposure to a part of a pattern. For this to work, it would have to be unlikely for us to experience a spatially distributed partial pattern on current exposure.
 
@@ -158,6 +158,7 @@ If we have higher-regions inhibited by the peripheral (fast burnout) cells in A,
 
 SUCCESSES
 
-Our CHTM without a temporal pooler (spatial learning only), can correctly learn the sequences ABC and BAC with a training set of 150 characters, 9 encoded inputs, and 2 100-cell regions)
+2016-01-10 Our CHTM without a temporal pooler (spatial learning only), can correctly learn the sequences ABC and BAC with a training set of 150 characters, 9 encoded inputs, and 2 100-cell regions)
 
-CHTM with distal and proximal segments, excitatory & inhibitory cells, 1 10x10 region over 500 repetitions, is able to learn ABCD vs EBCF (higher order temporal learning)
+2016-02-02 CHTM with distal and proximal segments, excitatory only cells, 1 10x10 region over 500 repetitions, is able to learn ABCD vs EBCF (higher order temporal learning)
+

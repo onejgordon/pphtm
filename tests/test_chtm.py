@@ -105,13 +105,14 @@ class FileProcesser(object):
                 done = False
                 while not done:
                     next = raw_input("Enter next letter (q to exit) >> ")
-                    done = next.upper() == 'Q'
-                    if done:
-                        break
-                    inputs = self.encode_letter(next)
-                    self.b.process(inputs, learning=False)
-                    prediction = self.classifier.predict(k=1)
-                    print "Prediction: %s" % prediction
+                    if next:
+                        done = next.upper() == 'Q'
+                        if done:
+                            break
+                        inputs = self.encode_letter(next)
+                        self.b.process(inputs, learning=False)
+                        prediction = self.classifier.predict(k=1)
+                        print "Prediction: %s" % prediction
             else:
                 while True:
                     user_char = raw_input("Enter a letter to see prediction at t+1... (! to exit) >> ")

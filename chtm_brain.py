@@ -10,21 +10,8 @@
 
 # CURRENT PROBLEMS
 # -----------------------
-# pattern as distal bias continues to predict same? Or
-# will these patterns die randomly as proximal goes away?
-# Distal biases either saturate or go to 0 after 100 iterations, why?
-# Looking for invariant representations in the bias layer (pattern that predicts
-# itself)
-# Are we learning before render, causing confusing synapse audits?
-# We can't have all cells in SDR learn the same way or we wont produce
-# unique pattern detectors that can detect multiple longer-term pattersn
-# Pick learners randomly?
 
 # Once a region has learned, bias should be a subset of proximal overlap on each step
-# Should be able to see transition learning
-# In simple ABAB pattern, all activations remain at either .5 or 1.0, so
-# how is distal learning possible? Should we pick learning synapses more
-# relatively? Learn from most active in prior step?
 
 # All segments are learning same patterns? How to choose which to learn?
 # A->B, since it's less frequent, is unable to learn this transition (we
@@ -32,10 +19,17 @@
 # If so, how do we ensure we ever have activity? Should we learn on most
 # active segment? Doesn't work because we then only learn on one seg each cell
 
-# Should we unlearn distabl predictions that never activate?
+# Should we unlearn distabl predictions that never activate? Causing noise
+# in bias layer that doesn't go away.
+
+# Looks like we are learning too much on one segment (active),
+# straddline multiple patterns.
 
 # TODO
 # Render proximal connections (and re-initialize changes there too)
+
+# Now it's time to build invariant SDRs at a higher region layer.
+# These can predict all pattern members regardless of order.
 # -----------------------
 
 import numpy as np
@@ -304,6 +298,8 @@ class Cell(object):
             synapses.extend(seg.connected_synapses())
         return synapses
 
+    def most_active_distal_segment(self):
+        return sorted(self.distal_segments, key=lambda seg : seg.total_activation(), reverse=True)[0]
 
 class Region(object):
     '''
@@ -331,6 +327,7 @@ class Region(object):
         self.overlap = np.zeros(self.n_cells)  # Overlap for each cell. overlap[c] is double
         self.boost = np.ones(self.n_cells, dtype=float)  # Boost value for cell c
         self.bias = np.zeros(self.n_cells)
+        self.pre_activation = np.zeros(self.n_cells)
         self.active_duty_cycle = np.zeros((self.n_cells))  # Sliding average: how often column c has been active after inhibition (e.g. over the last 1000 iterations).
         self.overlap_duty_cycle = np.zeros((self.n_cells))  # Sliding average: how often column c has had significant overlap (> min_overlap)
         self.last_activation = None  # Hold last step in state for rendering
@@ -456,12 +453,12 @@ class Region(object):
             - Bias (distal)
         Sum the two (weighted) and choose winners (active outputs)
         '''
-        pre_activation = OVERLAP_EFFECT * self.overlap + DISTAL_BIAS_EFFECT * self.bias
+        self.pre_activation = OVERLAP_EFFECT * self.overlap + DISTAL_BIAS_EFFECT * self.bias
         active = np.zeros(len(self.cells))
         for c in self.cells:
-            pa = pre_activation[c.index]
+            pa = self.pre_activation[c.index]
             neighbors = self._neighbors_of(c)
-            kth_score = self._kth_score(neighbors, pre_activation, k=DESIRED_LOCAL_ACTIVITY)
+            kth_score = self._kth_score(neighbors, self.pre_activation, k=DESIRED_LOCAL_ACTIVITY)
             if pa > 0 and pa >= kth_score:
                 active[c.index] = True
         return active
@@ -502,7 +499,6 @@ class Region(object):
         On activating cells, increase permenences for each excitatory synapse above a min. contribution
         On non-activating cells, increase permenences for each inhibitory synapse above a min. contribution
         '''
-        LEARN_ON_MOST_ACTIVE = True
         n_increased_prox = n_decreased_prox = n_increased_dist = n_decreased_dist = n_conn_prox = n_discon_prox = n_conn_dist = n_discon_dist = 0
         for i, is_activating in enumerate(activating):
             cell = self.cells[i]
@@ -515,11 +511,9 @@ class Region(object):
                     n_conn_prox += nc
                     n_discon_prox += ndc
             # Distal
-            most_active = -1
-            if LEARN_ON_MOST_ACTIVE:
-                most_active = sorted(cell.distal_segments, key=lambda seg : seg.total_activation(), reverse=True)[0]
+            most_active = cell.most_active_distal_segment()
             for seg in cell.distal_segments:
-                do_learn = is_activating and (seg.index == most_active.index or not LEARN_ON_MOST_ACTIVE)
+                do_learn = is_activating and (seg.index == most_active.index)
                 if do_learn:
                     ni, nd, nc, ndc = self.learn_segment(seg, is_activating=is_activating, distal=True)
                     n_increased_dist += ni
