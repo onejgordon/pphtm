@@ -38,7 +38,8 @@ class VIEW():
     }
 
     MAX_VALUE = {
-        BIAS: 3
+        BIAS: 3,
+        OVERLAP: 2
     }
 
     @staticmethod
@@ -216,15 +217,16 @@ class CHTMPrinter(object):
             cg.render(self.focus_cell_index)
 
     def focus_cell(self, region, index):
-        self.focus_cell_index = index
-        cell = region.cells[index]
-        self.cell_window.wm_title("Cell %d" % index)
-        print "\nFocusing on %s" % (cell)
-        for si, cg in enumerate(self.focus_grids):
-            cg.cell_value_fn = partial(VIEW.cell_connections, cell, segment_index=si)
-            cg.cell_highlight_fn = partial(VIEW.synapse_change, cell, segment_index=si)
-            cg.grid_hl_fn = partial(VIEW.segment_learning, cell, segment_index=si)
-            cg.render()
+        if index < len(region.cells):
+            self.focus_cell_index = index
+            cell = region.cells[index]
+            self.cell_window.wm_title("Cell %d" % index)
+            print "\nFocusing on %s" % (cell)
+            for si, cg in enumerate(self.focus_grids):
+                cg.cell_value_fn = partial(VIEW.cell_connections, cell, segment_index=si)
+                cg.cell_highlight_fn = partial(VIEW.synapse_change, cell, segment_index=si)
+                cg.grid_hl_fn = partial(VIEW.segment_learning, cell, segment_index=si)
+                cg.render()
 
 class CellGrid(object):
     '''

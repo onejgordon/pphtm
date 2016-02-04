@@ -160,5 +160,5 @@ SUCCESSES
 
 2016-01-10 Our CHTM without a temporal pooler (spatial learning only), can correctly learn the sequences ABC and BAC with a training set of 150 characters, 9 encoded inputs, and 2 100-cell regions)
 
-2016-02-02 CHTM with distal and proximal segments, excitatory only cells, 1 10x10 region over 500 repetitions, is able to learn ABCD vs EBCF (higher order temporal learning)
+2016-02-02 CHTM with distal and proximal segments, excitatory only cells, 1 10x10 region over 500 repetitions, is able to learn ABCD vs EBCF (higher order temporal learning) (turns out this may still be semi-random, inconsistent)
 

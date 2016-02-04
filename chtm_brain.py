@@ -27,6 +27,9 @@
 
 # TODO
 # Render proximal connections (and re-initialize changes there too)
+# Should we try boosting distal synapses if active duty cycle low?
+# Print a learning metric (bias/overlap alignment?) to monitor progress in a run
+# Run a few more times to see if wecan consistently learn ABCD/EBCF
 
 # Now it's time to build invariant SDRs at a higher region layer.
 # These can predict all pattern members regardless of order.
@@ -55,16 +58,19 @@ INIT_PERMANENCE_LEARN_DEC_CHANGE = 0.005
 DESIRED_LOCAL_ACTIVITY = 2
 DO_BOOSTING = True
 CHANCE_OF_INHIBITORY = 0.0
-DISTAL_BIAS_EFFECT = 0.5
+DISTAL_BIAS_EFFECT = 0.8
 OVERLAP_EFFECT = 0.5
 T_START_BOOSTING = 50
+MIN_FADE_RATE, MAX_FADE_RATE = (0.2, 0.5)
 
-DISTAL_SYNAPSE_CHANCE = 0.1
-MAX_POXIMAL_INIT_SYNAPSE_CHANCE = 0.3
+DISTAL_SYNAPSE_CHANCE = 0.2
+MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.3
 MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.05
 
 DISTAL_SEGMENTS = 3
 PROX_SEGMENTS = 2
+
+BOOST_DISTAL = False
 
 def log(message, level=1):
     if VERBOSITY >= level:
@@ -132,7 +138,7 @@ class Segment(object):
                 input_x, input_y = util.coords_from_index(source, self.region._input_side_len())
                 dist = util.distance((cell_x, cell_y), (input_x, input_y))
                 max_distance = self.region.diagonal
-                chance_of_synapse = ((MAX_POXIMAL_INIT_SYNAPSE_CHANCE - MIN_PROXIMAL_INIT_SYNAPSE_CHANCE) * (1 - float(dist)/max_distance)) + MIN_PROXIMAL_INIT_SYNAPSE_CHANCE
+                chance_of_synapse = ((MAX_PROXIMAL_INIT_SYNAPSE_CHANCE - MIN_PROXIMAL_INIT_SYNAPSE_CHANCE) * (1 - float(dist)/max_distance)) + MIN_PROXIMAL_INIT_SYNAPSE_CHANCE
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(source)
@@ -234,7 +240,7 @@ class Cell(object):
         self.proximal_segments = []
         self.activation = 0.0 # [0.0, 1.0]
         self.coords = util.coords_from_index(index, self.region._cell_side_len())
-        self.fade_rate = random.uniform(0.2, 0.5)
+        self.fade_rate = random.uniform(MIN_FADE_RATE, MAX_FADE_RATE)
         self.excitatory = random.random() > CHANCE_OF_INHIBITORY
 
         # History
@@ -408,17 +414,26 @@ class Region(object):
             b = 1 + (min_duty_cycle - self.active_duty_cycle[c]) * BOOST_MULTIPLIER
         return b
 
-    def _increase_permanences(self, c, increase, excitatory_only=False):
+    def _increase_permanences(self, c, increase, excitatory_only=False, type="proximal"):
         '''
         Increase the permanence value of every excitatory synapse (cell c) by a increase factor
         TODO: Should this be for a specific segment?
         '''
         cell = self.cells[c]
-        for seg in self.cells[c].proximal_segments:
-            for i, perm in enumerate(seg.syn_permanences):
-                source_cell = seg.source_cell(i)
-                if source_cell.excitatory or not excitatory_only:
-                    seg.syn_permanences[i] = min([perm+increase, 1.0])
+        if type == "proximal":
+            for seg in self.cells[c].proximal_segments:
+                for i, perm in enumerate(seg.syn_permanences):
+                    source_cell = seg.source_cell(i)
+                    if source_cell.excitatory or not excitatory_only:
+                        seg.syn_permanences[i] = min([perm+increase, 1.0])
+
+        if type == "distal" and BOOST_DISTAL:
+            # Try also increasing distal segments
+            for seg in self.cells[c].distal_segments:
+                for i, perm in enumerate(seg.syn_permanences):
+                    source_cell = seg.source_cell(i)
+                    if source_cell.excitatory or not excitatory_only:
+                        seg.syn_permanences[i] = min([perm+increase, 1.0])
 
     def calculate_distal_biases(self):
         '''
@@ -453,7 +468,8 @@ class Region(object):
             - Bias (distal)
         Sum the two (weighted) and choose winners (active outputs)
         '''
-        self.pre_activation = OVERLAP_EFFECT * self.overlap + DISTAL_BIAS_EFFECT * self.bias
+        PREACTIVATION_REQUIRES_PROXIMAL = True
+        self.pre_activation = OVERLAP_EFFECT * self.overlap * (1 + DISTAL_BIAS_EFFECT * self.bias)
         active = np.zeros(len(self.cells))
         for c in self.cells:
             pa = self.pre_activation[c.index]
@@ -511,9 +527,12 @@ class Region(object):
                     n_conn_prox += nc
                     n_discon_prox += ndc
             # Distal
-            most_active = cell.most_active_distal_segment()
+            any_active = any([seg.active() for seg in cell.distal_segments])
+            most_active = None
+            if not any_active:
+                most_active = cell.most_active_distal_segment()
             for seg in cell.distal_segments:
-                do_learn = is_activating and (seg.index == most_active.index)
+                do_learn = is_activating and (seg.active() or (most_active and seg.index == most_active.index))
                 if do_learn:
                     ni, nd, nc, ndc = self.learn_segment(seg, is_activating=is_activating, distal=True)
                     n_increased_dist += ni
@@ -541,8 +560,10 @@ class Region(object):
                 # Check if overlap duty cycle less than minimum (note: min is calculated from max *active* not overlap)
                 if self.overlap_duty_cycle[i] < min_duty_cycle:
                     # log("Increasing permanences for cell %s in region %d due to overlap duty cycle below min: %s" % (i, self.index, min_duty_cycle))
-                    self._increase_permanences(i, 0.1 * CONNECTED_PERM)
+                    self._increase_permanences(i, 0.1 * CONNECTED_PERM, type="proximal")
                     n_boosted += 1
+
+                # TODO: Boost distal here if active_duty_cycle low?
 
             all_field_sizes.append(self.cells[i].connected_receptive_field_size())
 
