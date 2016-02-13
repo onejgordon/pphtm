@@ -4,14 +4,19 @@ from Tkinter import *
 import math
 import util
 from functools import partial
+import numpy as np
 
 REGION_BUFFER = 20
-HIGHLIGHT_DELAY = 3000
-INHIBITION_RADIUS_BAR_HEIGHT = 3
-INHIBITION_RADIUS_BAR_BUFFER = 10
-CELL_PX = 15
-OUTLINE_COLOR = "#555555"
-VIEWABLE_SEGMENTS = 5
+CELL_PX = 12
+GRID_OUTLINE = "#555555"
+VIEWABLE_SEGMENTS = 3
+INDICATOR_DIAMETER = CELL_PX / 3
+
+################
+# TODO
+# Print segment activation (seems that some segments are not activating when they should)
+# Class for region printer to more gracefully handle multiple regions
+################
 
 class VIEW():
     INPUTS = 1
@@ -42,97 +47,110 @@ class VIEW():
         OVERLAP: 2
     }
 
-    @staticmethod
-    def input_value(brain, index):
-        return brain.inputs[index]
+    # DRAW FUNCTIONS
+    # These methods return a tuple (fill value, indicator color, outline color)
 
     @staticmethod
-    def activation_value(region, index):
+    def draw_input(printer, index):
+        return (printer.brain.inputs[index], None, None)
+
+    @staticmethod
+    def draw_activation(printer, region, index):
         '''
         Activation from this time step (before learning)
         '''
-        return region.last_activation[index]
+        ol = None
+        if index == printer.focus_cell_index:
+            ol = "#fff"
+        value = region.last_activation[index]
+        activating = region.cells[index].activation == 1.0
+        hl = "#fff" if activating else None
+        return (value, hl, ol)
 
     @staticmethod
-    def preactivation_value(region, index):
+    def draw_preactivation(printer, region, index):
         '''
         '''
-        return region.pre_activation[index]
+        ol = None
+        if index == printer.focus_cell_index:
+            ol = "#fff"
+        return (region.pre_activation[index], None, ol)
 
     @staticmethod
-    def overlap_value(region, index):
-        return region.overlap[index]
+    def draw_overlap(printer, region, index):
+        ol = None
+        if index == printer.focus_cell_index:
+            ol = "#fff"
+        return (region.overlap[index], None, ol)
 
     @staticmethod
-    def bias_value(region, index):
-        return region.bias[index]
+    def draw_bias(printer, region, index):
+        ol = None
+        if index == printer.focus_cell_index:
+            ol = "#fff"
+        overlap_match = region.bias[index] > 0 and region.overlap[index] > 0
+        indicator = "#fff" if overlap_match else ""
+        if printer.view_active("next_bias"):
+            cell = region.cells[index]
+            for seg in cell.distal_segments:
+                active_after_current_activation = seg.active()
+                if active_after_current_activation:
+                    ol = "#FFFF00"
+                    continue
+        return (region.bias[index], indicator, ol)
 
     @staticmethod
-    def cell_connections(cell, index, segment_index=0):
+    def draw_cell_synapses(printer, cell, index, segment_index=0):
+        perm = 0
+        indicator = None
+        ol = None
+        if index == printer.focus_cell_index:
+            ol = "#fff"
         if segment_index < len(cell.distal_segments):
             seg = cell.distal_segments[segment_index]
             if index in seg.syn_sources:
+                # There is a synapse here
                 syn_index = seg.syn_sources.index(index)
                 perm = seg.syn_permanences[syn_index]
-                return perm
-        return 0
+                change = seg.syn_last_change[syn_index]
+                contribution = seg.syn_last_contribution[syn_index]
+                ol = "#F36B1D" if contribution > 0.5 else ""
+                if change == 0:
+                    indicator = None
+                elif change > 0:
+                    indicator = "#fff"
+                elif change < 0:
+                    indicator = "#000"
+        return (perm, indicator, ol)
+
+    # GRID OUTLINE METHODS
+    # These methods return a color for the full grid's outline
 
     @staticmethod
     def segment_learning(cell, segment_index=0):
         if segment_index < len(cell.distal_segments):
-            learning = any(cell.distal_segments[segment_index].syn_last_change)
-            return "#FF7800" if learning else ""
-        return ""
-
-
-    # Highlight functions (return color to highlight or none)
-
-    @staticmethod
-    def activating_now(region, index):
-        '''
-        Cells activated by current time step
-        '''
-        activating = region.cells[index].activation == 1.0
-        return "#fff" if activating else None
-
-    @staticmethod
-    def synapse_change(cell, index, segment_index=0):
-        if segment_index < len(cell.distal_segments):
             seg = cell.distal_segments[segment_index]
-            if index in seg.syn_sources:
-                syn_index = seg.syn_sources.index(index)
-                change = seg.syn_last_change[syn_index]
-                if change == 0:
-                    color = None
-                elif change > 0:
-                    color = "#fff"
-                elif change < 0:
-                    color = "#000"
-                return color
-        return None
-
-    @staticmethod
-    def highlight(region, index):
-        return None
+            learning = any(seg.syn_last_change)
+            active = seg.active_before_learning
+            if learning and active:
+                return "#FFFF55"
+            elif learning:
+                return "#00CCFF"
+            elif active:
+                return "#FFFF00"
+        return ""
 
     DRAW = [ACTIVATION, PREACTIVATION, OVERLAP, BIAS]
 
-VALUE_FN = {
-    VIEW.INPUTS: VIEW.input_value,
-    VIEW.ACTIVATION: VIEW.activation_value,
-    VIEW.PREACTIVATION: VIEW.preactivation_value,
-    VIEW.OVERLAP: VIEW.overlap_value,
-    VIEW.BIAS: VIEW.bias_value,
-}
-
-HL_FN = {
-    VIEW.ACTIVATION: VIEW.activating_now,
-    VIEW.OVERLAP: VIEW.highlight,
-    VIEW.BIAS: VIEW.highlight,
+DRAW_FN = {
+    VIEW.INPUTS: VIEW.draw_input,
+    VIEW.ACTIVATION: VIEW.draw_activation,
+    VIEW.PREACTIVATION: VIEW.draw_preactivation,
+    VIEW.OVERLAP: VIEW.draw_overlap,
+    VIEW.BIAS: VIEW.draw_bias,
 }
 
 class CHTMPrinter(object):
-
 
     def __init__(self, brain):
         self.brain = brain
@@ -140,9 +158,17 @@ class CHTMPrinter(object):
         self.canvas = None
         self.cell_window = None
         self.cell_canvas = None
+        self.focus_cell_index = None
+        self.rolling_bias_match = []
+        self.menubar = None
+
+        # State
+        self.view_toggles = ["next_bias"]
+
+        # Canvas items
+        self.rolling_match_text = None
         self.main_grids = []
         self.focus_grids = []
-        self.focus_cell_index = None
 
     def setup(self):
         self.window = Tk()
@@ -154,8 +180,8 @@ class CHTMPrinter(object):
         self.canvas = Canvas(self.window)
 
         # Create input grid
-        value_fn = partial(VIEW.input_value, self.brain)
-        input_rc = CellGrid(REGION_BUFFER, top, self.brain.n_inputs, canvas=self.canvas, cell_value_fn=value_fn, view_type=VIEW.INPUTS) # Inputs
+        draw_fn = partial(VIEW.draw_input, self)
+        input_rc = CellGrid(REGION_BUFFER, top, self.brain.n_inputs, canvas=self.canvas, cell_draw_fn=draw_fn, view_type=VIEW.INPUTS) # Inputs
         self.main_grids.append(input_rc)
         x, _y = input_rc.bottom_right()
 
@@ -164,15 +190,13 @@ class CHTMPrinter(object):
             y = top
             side = r._cell_side_len()
             for view_index, view_type in enumerate(VIEW.DRAW):
-                value_fn = partial(VALUE_FN.get(view_type), r)
-                _hl_fn = HL_FN.get(view_type)
-                highlight_fn = partial(_hl_fn, r) if _hl_fn else None
+                draw_fn = partial(DRAW_FN.get(view_type), self, r)
                 on_cell_click = partial(self.focus_cell, r)
                 max_value = VIEW.MAX_VALUE.get(view_type)
                 grid_title = VIEW.LABEL.get(view_type)
                 if max_value is None:
                     max_value = 1.0
-                cg = CellGrid(x + REGION_BUFFER, y, r.n_cells, canvas=self.canvas, window=self.window, view_type=view_type, cell_value_fn=value_fn, cell_highlight_fn=highlight_fn, on_cell_click=on_cell_click, max_value=max_value, title=grid_title)
+                cg = CellGrid(x + REGION_BUFFER, y, r.n_cells, canvas=self.canvas, window=self.window, view_type=view_type, cell_draw_fn=draw_fn, on_cell_click=on_cell_click, max_value=max_value, title=grid_title)
                 if cg.side > max_side:
                     max_side = cg.side * CELL_PX
                 if cg.n_cells > max_cells:
@@ -182,6 +206,7 @@ class CHTMPrinter(object):
                 if y > max_height:
                     max_height = y
                 y += REGION_BUFFER
+
             x = _x + REGION_BUFFER
 
         main_width = x+REGION_BUFFER
@@ -189,7 +214,9 @@ class CHTMPrinter(object):
         self.canvas.config(width=main_width, height=main_height)
         self.canvas.pack()
 
-        # Cell window & canvas
+        self.rolling_match_text = self.canvas.create_text(main_width / 6, main_height - 100, fill="#000", font=("Purisa", 25), anchor="w")
+
+        # Cell detail window & canvas
         width = max_side + 2*REGION_BUFFER
         height = VIEWABLE_SEGMENTS * (max_side + REGION_BUFFER) + REGION_BUFFER
         self.cell_window = Toplevel()
@@ -197,10 +224,10 @@ class CHTMPrinter(object):
         self.cell_canvas.pack()
 
         for i in range(VIEWABLE_SEGMENTS):
-            value_fn = None
-            highlight_fn = None
-            grid_hl_fn = None
-            cg = CellGrid(REGION_BUFFER, (i * (max_side + REGION_BUFFER)) + REGION_BUFFER, r.n_cells, canvas=self.cell_canvas, window=self.window, view_type=VIEW.SEGMENT_DETAIL, cell_value_fn=value_fn, cell_highlight_fn=highlight_fn, grid_hl_fn=grid_hl_fn, saturate_value=0.2)
+            draw_fn = None
+            grid_outline_fn = None
+            on_cell_click = partial(self.focus_synapse, r, i)
+            cg = CellGrid(REGION_BUFFER, (i * (max_side + REGION_BUFFER)) + REGION_BUFFER, r.n_cells, canvas=self.cell_canvas, window=self.window, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=0.5, on_cell_click=on_cell_click)
             self.focus_grids.append(cg)
 
         # Initialize all cell grids
@@ -209,31 +236,67 @@ class CHTMPrinter(object):
         for cg in self.focus_grids:
             cg.initialize()
 
+        # Create menu
+        self.menubar = Menu(self.window)
+        action_menu = Menu(self.menubar, tearoff=0)
+        action_menu.add_command(label="Toggle Next Bias Showing", command=partial(self.toggle_view, 'next_bias'))
+        action_menu.add_command(label="Segment Activation Showing", command=partial(self.toggle_view, 'segment_activation'))
+        self.menubar.add_cascade(label="Action", menu=action_menu)
+        self.window.config(menu=self.menubar)
+
         # Move main window to right of cell
         self.window.geometry('%dx%d+%d+%d' % (main_width, main_height, width, 0))
 
+    def toggle_view(self, toggle):
+        if toggle in self.view_toggles:
+            self.view_toggles.remove(toggle)
+        else:
+            self.view_toggles.append(toggle)
+
+    def view_active(self, view):
+        return view in self.view_toggles
+
     def render(self):
-        for cg in (self.main_grids + self.focus_grids):
+        for cg in self.main_grids + self.focus_grids:
             cg.render(self.focus_cell_index)
+
+        r = self.brain.regions[0]
+        bias_count = float(sum(r.bias > 0))
+        if bias_count > 0:
+            bias_match = sum(np.logical_and(r.bias > 0, r.overlap > 0))
+            ratio = bias_match / bias_count
+        else:
+            ratio = 0
+        if ratio:
+            util.rolling_list(self.rolling_bias_match, length=5, new_value=ratio)
+        rolling_average = util.average(self.rolling_bias_match)
+        self.canvas.itemconfig(self.rolling_match_text, text="%.2f" % rolling_average)
 
     def focus_cell(self, region, index):
         if index < len(region.cells):
             self.focus_cell_index = index
             cell = region.cells[index]
             self.cell_window.wm_title("Cell %d" % index)
-            print "\nFocusing on %s" % (cell)
+            print "Focusing on %s" % (cell)
             for si, cg in enumerate(self.focus_grids):
-                cg.cell_value_fn = partial(VIEW.cell_connections, cell, segment_index=si)
-                cg.cell_highlight_fn = partial(VIEW.synapse_change, cell, segment_index=si)
-                cg.grid_hl_fn = partial(VIEW.segment_learning, cell, segment_index=si)
+                cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=si)
+                cg.grid_outline_fn = partial(VIEW.segment_learning, cell, segment_index=si)
                 cg.render()
+
+    def focus_synapse(self, region, segment_index, index):
+        if self.focus_cell_index:
+            cell = region.cells[self.focus_cell_index]
+            seg = cell.distal_segments[segment_index]
+            perm, contr, last_change = seg.synapse_state(index)
+            print "Synapse focus_cell=%s source_index=%s permanence=%s contribution=%s last_change=%s" % (self.focus_cell_index, index, perm, contr, last_change)
+
 
 class CellGrid(object):
     '''
     Canvas to draw a view of one region and handle clicks
     '''
 
-    def __init__(self, x, y, n_cells, canvas=None, window=None, view_type=None, cell_value_fn=None, cell_highlight_fn=None, grid_hl_fn=None, on_cell_click=None, max_value=1.0, saturate_value=1.0, title=None):
+    def __init__(self, x, y, n_cells, canvas=None, window=None, view_type=None, cell_draw_fn=None, grid_outline_fn=None, on_cell_click=None, max_value=1.0, saturate_value=1.0, title=None):
         self.x, self.y = x, y # upper left
         self.n_cells = n_cells
         self.max_value = max_value
@@ -243,11 +306,11 @@ class CellGrid(object):
         self.canvas = canvas
         self.window = window
         self.view_type = view_type
-        self.cell_value_fn = cell_value_fn
-        self.cell_highlight_fn = cell_highlight_fn
-        self.grid_hl_fn = grid_hl_fn
+        self.cell_draw_fn = cell_draw_fn
+        self.grid_outline_fn = grid_outline_fn
         self.on_cell_click = on_cell_click # fn
         self.cell_rects = []
+        self.hl_indicators = []
         self.prior_activations = []
         self.temporary_widgets = []
         self.title = title
@@ -259,12 +322,20 @@ class CellGrid(object):
     def initialize(self):
         # Create frame background
         self.hl = self.canvas.create_rectangle(self.x, self.y, self.x + CELL_PX * self.side, self.y + CELL_PX * self.side, outline="#000")
-        # Create cells
+
+        # Create cell rects & highlight items for rendering
         for index in range(self.n_cells):
             abs_x, abs_y = self._cell_position(index)
-            cell_rect = self.canvas.create_rectangle(abs_x, abs_y, abs_x + CELL_PX, abs_y + CELL_PX, outline=OUTLINE_COLOR)
+            cell_rect = self.canvas.create_rectangle(abs_x, abs_y, abs_x + CELL_PX, abs_y + CELL_PX, outline=GRID_OUTLINE)
             self.canvas.tag_bind(cell_rect, "<Button-1>", self.handle_click)
             self.cell_rects.append(cell_rect)
+            # Create indicator
+            abs_x += CELL_PX / 4
+            abs_y += CELL_PX / 4
+            x_br = abs_x + INDICATOR_DIAMETER
+            y_br = abs_y + INDICATOR_DIAMETER
+            hl_indicator = self.canvas.create_oval(abs_x, abs_y, x_br, y_br, fill="", outline="")
+            self.hl_indicators.append(hl_indicator)
         if self.title:
             self.canvas.create_text((self.x, self.y - 9), text=self.title, fill="#000", font=("Purisa", 11), anchor="w")
 
@@ -274,12 +345,22 @@ class CellGrid(object):
         abs_x, abs_y = (x*CELL_PX + self.x, y*CELL_PX + self.y)
         return (abs_x, abs_y)
 
-    def _update_cell(self, index, brightness=0.0, color=(255,0,0), saturate=(255,255,255)):
+    def _update_cell(self, index, brightness=0.0, color=(255,0,0), saturate=(255,255,255), indicator_color=None, outline_color=None):
         r,g,b = [int(brightness*c) for c in color]
         if brightness >= self.saturate_value:
             r,g,b = saturate
         cell_color = '#%02x%02x%02x' % (r, g, b)
-        self.canvas.itemconfig(self.cell_rects[index], fill=cell_color)
+        if not outline_color:
+            outline_color = GRID_OUTLINE
+        self.canvas.itemconfig(self.cell_rects[index], fill=cell_color, outline=outline_color)
+        hl_indicator = self.hl_indicators[index]
+        indicator_outline = ""
+        if indicator_color:
+            indicator_outline = "#fff" if indicator_color == "#000" else "#000"
+            state = "normal"
+        else:
+            state = "hidden"
+        self.canvas.itemconfig(self.hl_indicators[index], fill=indicator_color, outline=indicator_outline, state=state)
 
     def handle_click(self, event):
         coordx = int((event.x - self.x) / CELL_PX)
@@ -288,32 +369,22 @@ class CellGrid(object):
         if self.on_cell_click:
             self.on_cell_click(index)
 
-    def value_at(self, index):
-        if self.cell_value_fn:
-            val = self.cell_value_fn(index)
+    def draw_params_at(self, index):
+        if self.cell_draw_fn:
+            value, hl_color, ol_color = self.cell_draw_fn(index)
             if self.max_value != 1.0:
-                val = val / self.max_value
-            return val
-
-    def highlight_at(self, index):
-        if self.cell_highlight_fn:
-            return self.cell_highlight_fn(index)
-        return None
+                value = value / self.max_value
+            return value, hl_color, ol_color
+        return (None, None, None)
 
     def clear_temporary_widgets(self):
         for w in self.temporary_widgets:
             self.canvas.delete(w)
 
-    def highlight_cell(self, index, color="#fff"):
+    def outline_cell(self, index, color="#FFFFFF"):
         x, y = self._cell_position(index)
-        DIAMETER = CELL_PX / 2
-        x += CELL_PX / 4
-        y += CELL_PX / 4
-        x_br = x + DIAMETER
-        y_br = y + DIAMETER
-        t = self.canvas.create_oval(x, y, x_br, y_br, fill=color)
+        t = self.canvas.create_rectangle(x, y, x + CELL_PX, y + CELL_PX, outline=color, fill="")
         self.temporary_widgets.append(t)
-        return t
 
     def add_cell_label(self, index, text="?"):
         x, y = self._cell_position(index)
@@ -327,24 +398,17 @@ class CellGrid(object):
         self.canvas.itemconfig(self.hl, outline=color, width=10.0)
 
     def render(self, focus_index=None):
-        hl_color = ""
-        if self.grid_hl_fn:
-            hl_color = self.grid_hl_fn()
-        self.highlight_grid(hl_color)
-        if self.cell_value_fn:
+        grid_outline = ""
+        if self.grid_outline_fn:
+            grid_outline = self.grid_outline_fn()
+        self.highlight_grid(grid_outline)
+        if self.cell_draw_fn:
             self.clear_temporary_widgets()
             color = VIEW.COLOR[self.view_type]
             saturate = self.saturate_color if self.saturate_color else color
             for index in range(self.n_cells):
-                value = self.value_at(index)
-                highlight_color = self.highlight_at(index)
-                self._update_cell(index, value, color=color, saturate=saturate)
-                if highlight_color:
-                    self.highlight_cell(index, color=highlight_color)
-            # Add focused cell
-            if focus_index is not None:
-                self._update_cell
-                self.highlight_cell(focus_index, color="#FFFF00")
+                value, indicator_color, outline_color = self.draw_params_at(index)
+                self._update_cell(index, value, color=color, saturate=saturate, indicator_color=indicator_color, outline_color=outline_color)
 
     def bottom_right(self):
         return (self.x + self.side*CELL_PX, self.y + self.side*CELL_PX)

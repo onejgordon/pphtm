@@ -14,7 +14,7 @@ class FileProcesser(object):
     ALPHA = "ABCDEF"
     CROP_FILE = 500
     N_INPUTS = 36
-    CPR = [10**2]
+    CPR = [12**2]
     auto_predict = 16
 
     def __init__(self, filename="simple_pattern2.txt", with_classifier=True, delay=50, animate=True):
@@ -113,6 +113,9 @@ class FileProcesser(object):
                         self.b.process(inputs, learning=False)
                         prediction = self.classifier.predict(k=1)
                         print "Prediction: %s" % prediction
+                        if self.animate:
+                            self.printer.render()
+
             else:
                 while True:
                     user_char = raw_input("Enter a letter to see prediction at t+1... (! to exit) >> ")

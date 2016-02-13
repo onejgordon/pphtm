@@ -4,6 +4,9 @@ import math
 import util
 import numpy as np
 
+CONSIDERATION_THRESHOLD = 1.0
+CLASSIFY_ON = "bias"
+
 class CHTMClassifier(object):
 
     ON_RATE_THRESH = 0.7
@@ -17,19 +20,22 @@ class CHTMClassifier(object):
         # Tallies sublist is histogram of counts for each category. Main list is each bit/cell
         self.tallies = None
         self.input_history = [] # Len == history window
-        self.activation_history = np.zeros((0, self.region.n_cells))
+        self.value_history = np.zeros((0, self.region.n_cells))
         self.t = 0
 
     def read(self, input):
         '''
         Input is raw category value index
         '''
-        activations = [c.activation for c in self.brain.regions[self.region_index].cells]
+        if CLASSIFY_ON == "acitvation":
+            values = [c.activation for c in self.region.cells]
+        elif CLASSIFY_ON == "bias":
+            values = self.region.bias
         self.input_history.append(input) # Add new input
-        self.activation_history = np.vstack((self.activation_history, activations)) # Add new activations
+        self.value_history = np.vstack((self.value_history, values)) # Add new values
         if len(self.input_history) > self.history_window:
             self.input_history = self.input_history[1:]
-            self.activation_history = self.activation_history[1:]            
+            self.value_history = self.value_history[1:]
 
     def predict(self, k=1):
         '''
@@ -37,20 +43,23 @@ class CHTMClassifier(object):
         '''
         # Build tally list
         self.tallies = [np.zeros(len(self.categories)) for x in range(self.region.n_cells)]
-        for t, activation in enumerate(self.activation_history):
+        for t, value in enumerate(self.value_history):
             if t+k < len(self.input_history):
                 input_t_plus_k = self.input_history[t+k]
                 if input_t_plus_k in self.categories:
-                    active_indexes = np.where(activation == 1.0)[0]
-                    for index in active_indexes:
+                    high_indexes = np.where(value >= CONSIDERATION_THRESHOLD)[0]
+                    for index in high_indexes:
                         cat_index = self.categories.find(input_t_plus_k)
                         self.tallies[index][cat_index] += 1
 
-        current_activation = np.array([cell.activation for cell in self.region.cells])
+        if CLASSIFY_ON == "activation":
+            current_values = np.array([cell.activation for cell in self.region.cells])
+        elif CLASSIFY_ON == "bias":
+            current_values = self.region.bias
 
-        active_indexes = np.where(current_activation == 1.0)[0]
+        high_indexes = np.where(current_values >= CONSIDERATION_THRESHOLD)[0]
         predicted_distribution = np.zeros(len(self.categories))
-        for index in active_indexes:
+        for index in high_indexes:
             cell_probability = self.tallies[index]
             predicted_distribution += cell_probability
 

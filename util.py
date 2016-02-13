@@ -22,8 +22,24 @@ def average(li):
     else:
         return 0
 
+
+def rolling_list(li, length=10, new_value=None, new_at_end=True):
+    curr_length = len(li)
+    if curr_length >= length:
+        if new_at_end:
+            li.pop(0) # Remove first
+        else:
+            li.pop() # Remove last
+    if new_at_end:
+        li.append(new_value)
+    else:
+        li.insert(0, new_value)
+    return li
+
+
 def toScreen(arr, resolution=30):
     return [j * resolution for j in arr]
+
 
 def distance(p1, p2):
     return abs(math.sqrt(sum([pow(x2 - x1, 2) for x1, x2 in zip(p1, p2)])))
