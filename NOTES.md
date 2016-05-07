@@ -1,4 +1,4 @@
-CODE
+# Notes
 
 "90% of the challenge is choosing the right problem to solve." -Jeff
 

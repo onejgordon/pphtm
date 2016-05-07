@@ -632,7 +632,10 @@ class Region(object):
 
 
 
-class CHTMBrain(object):
+class PPHTMBrain(object):
+    '''
+    Predictive Processing implementation of HTM.
+    '''
 
     def __init__(self, cells_per_region=None, min_overlap=DEF_MIN_OVERLAP, r1_inputs=1):
         self.regions = []
@@ -644,7 +647,7 @@ class CHTMBrain(object):
         self.inputs = None
 
     def __repr__(self):
-        return "<HTMBrain regions=%d>" % len(self.regions)
+        return "<PPHTMBrain regions=%d>" % len(self.regions)
 
     def initialize(self):
         n_inputs = self.n_inputs
