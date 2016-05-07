@@ -12,7 +12,7 @@ from nupic.encoders.scalar import ScalarEncoder
 class FileProcesser(object):
 
     ALPHA = "ABCDEF"
-    CROP_FILE = 500
+    CROP_FILE = 200
     N_INPUTS = 36
     CPR = [12**2]
     auto_predict = 16
@@ -97,7 +97,7 @@ class FileProcesser(object):
             if self.auto_predict:
                 predicted_stream = ""
                 for i in range(self.auto_predict):
-                    prediction = self.classifier.predict(k=1)
+                    prediction = self.classifier.predict()
                     predicted_stream += prediction
                     inputs = self.encode_letter(prediction)
                     self.b.process(inputs, learning=False)
@@ -111,7 +111,7 @@ class FileProcesser(object):
                             break
                         inputs = self.encode_letter(next)
                         self.b.process(inputs, learning=False)
-                        prediction = self.classifier.predict(k=1)
+                        prediction = self.classifier.predict()
                         print "Prediction: %s" % prediction
                         if self.animate:
                             self.printer.render()
@@ -124,7 +124,7 @@ class FileProcesser(object):
                     else:
                         inputs = self.encode_letter(user_char)
                         self.b.process(inputs, learning=False)
-                        prediction = self.classifier.predict(k=1)
+                        prediction = self.classifier.predict()
                         print "Prediction: %s" % prediction
 
         self.printer.window.destroy()

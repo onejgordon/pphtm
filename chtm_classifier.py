@@ -5,7 +5,7 @@ import util
 import numpy as np
 
 CONSIDERATION_THRESHOLD = 1.0
-CLASSIFY_ON = "bias"
+CLASSIFY_ON = "activation" # or bias
 
 class CHTMClassifier(object):
 
@@ -27,7 +27,7 @@ class CHTMClassifier(object):
         '''
         Input is raw category value index
         '''
-        if CLASSIFY_ON == "acitvation":
+        if CLASSIFY_ON == "activation":
             values = [c.activation for c in self.region.cells]
         elif CLASSIFY_ON == "bias":
             values = self.region.bias
@@ -37,11 +37,10 @@ class CHTMClassifier(object):
             self.input_history = self.input_history[1:]
             self.value_history = self.value_history[1:]
 
-    def predict(self, k=1):
-        '''
-        k is distance into future to predict
-        '''
-        # Build tally list
+    def predict(self):
+        # Build tally list (number of times each cat came on k-steps after each cell)
+        # CONFIRM: bias classification predicts this time step (bias not updated until next input)
+        k = 1 if CLASSIFY_ON == "activation" else 0
         self.tallies = [np.zeros(len(self.categories)) for x in range(self.region.n_cells)]
         for t, value in enumerate(self.value_history):
             if t+k < len(self.input_history):
