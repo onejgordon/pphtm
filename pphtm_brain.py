@@ -4,6 +4,7 @@ import numpy as np
 import random
 import math
 import util
+from util import printarray
 
 # Settings
 
@@ -40,35 +41,6 @@ BOOST_DISTAL = False
 def log(message, level=1):
     if VERBOSITY >= level:
         print message
-
-def printarray(array, coerce_to_int=True, continuous=False):
-    if continuous:
-        # Takes an array of doubles
-        out = ""
-        _max = max(array)
-        if _max:
-            normalized = [x/_max for x in array]
-        else:
-            normalized = array
-        for item in normalized:
-            if math.isnan(item):
-                simplified = "?"
-            else:
-                if item < 0:
-                    simplified = "N" # Negative
-                else:
-                    simplified = str(int(item*5))
-                    if simplified == "0":
-                        simplified = "."
-            out += simplified
-        out += " (max: %.1f)" % _max
-        return out
-    else:
-        if type(array[0]) is int or coerce_to_int:
-            return ''.join([str(int(x)) for x in array])
-        elif type(array[0]) in [float, np.float64]:
-            return '|'.join([str(int(x)) for x in array])
-
 
 class Segment(object):
     '''
