@@ -5,7 +5,7 @@ import util
 import numpy as np
 
 CONSIDERATION_THRESHOLD = 1.0
-CLASSIFY_ON = "activation" # or bias
+CLASSIFY_ON = "bias" # or bias
 
 class CHTMClassifier(object):
 

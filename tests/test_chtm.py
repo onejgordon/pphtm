@@ -7,10 +7,12 @@ from chtm_printer import CHTMPrinter
 from chtm_classifier import CHTMClassifier
 import numpy as np
 
+from encoders import LetterEncoder
 from nupic.encoders.scalar import ScalarEncoder
 
 class FileProcesser(object):
 
+    DATA_DIR = "data"
     ALPHA = "ABCDEF"
     CROP_FILE = 200
     N_INPUTS = 36
@@ -30,25 +32,19 @@ class FileProcesser(object):
         if with_classifier:
             self.classifier = CHTMClassifier(self.b, categories=self.ALPHA, region_index=len(self.CPR)-1, history_window=self.CROP_FILE/2)
 
-        self.encoder = ScalarEncoder(n=self.N_INPUTS, w=5, minval=1, maxval=self.N_INPUTS, periodic=False, forced=True)
+        if True:
+            self.encoder = SimpleFullWidthEncoder(n_inputs=self.N_INPUTS, n_cats=len(self.ALPHA))
+        else:
+            self.encoder = ScalarEncoder(n=self.N_INPUTS, w=5, minval=1, maxval=self.N_INPUTS, periodic=False, forced=True)
 
-        with open(filename, 'r') as myfile:
+        with open(self.DATA_DIR+"/"+filename, 'r') as myfile:
             self.data = myfile.read()
 
         self.cursor = 0
 
     def encode_letter(self, c):
-        if True:
-            # Manual encoding (simple)
-            i = ord(c) - 65 # A = 0
-            n_cats = len(self.ALPHA)
-            offset = n_cats*i
-            inputs = np.zeros(self.N_INPUTS)
-            inputs[offset:offset+n_cats] = 1
-            return inputs
-        else:
-            i = ord(c) - 64
-            return self.encoder.encode(i)
+        i = ord(c) - 64 # A == 0
+        return self.encoder.encode(i)
 
     def run(self):
         self.printer.window.after(self.delay, self.process)

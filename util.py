@@ -119,3 +119,6 @@ def printarray(array, coerce_to_int=True, continuous=False):
             return ''.join([str(int(x)) for x in array])
         elif type(array[0]) in [float, np.float64]:
             return '|'.join([str(int(x)) for x in array])
+
+def bool_overlap(arr1, arr2):
+    return sum((arr1/arr1) == (arr2/arr2))

@@ -4,51 +4,50 @@ from os import path
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 from pphtm_brain import PPHTMBrain
 from chtm_printer import CHTMPrinter
-from chtm_classifier import CHTMClassifier
+from pphtm_predictor import PPHTMPredictor
 import numpy as np
 
 from nupic.encoders.scalar import ScalarEncoder
+from encoders import SimpleFullWidthEncoder
+
+USE_SIMPLE_ENCODER = True
 
 class FileProcesser(object):
 
+    DATA_DIR = "data"
     ALPHA = "ABCDEF"
-    CROP_FILE = 200
+    CROP_FILE = 300
     N_INPUTS = 36
-    CPR = [12**2]
+    CPR = [6**2, 6**2]
     auto_predict = 16
 
     def __init__(self, filename="simple_pattern2.txt", with_classifier=True, delay=50, animate=True):
         self.b = PPHTMBrain(cells_per_region=self.CPR, min_overlap=1, r1_inputs=self.N_INPUTS)
         self.b.initialize()
-        self.printer = CHTMPrinter(self.b)
-        self.printer.setup()
         self.classifier = None
         self.animate = animate
         self.current_batch_target = 0
         self.current_batch_counter = 0
         self.delay = delay
         if with_classifier:
-            self.classifier = CHTMClassifier(self.b, categories=self.ALPHA, region_index=len(self.CPR)-1, history_window=self.CROP_FILE/2)
+            self.classifier = PPHTMPredictor(self.b, categories=self.ALPHA)
 
-        self.encoder = ScalarEncoder(n=self.N_INPUTS, w=5, minval=1, maxval=self.N_INPUTS, periodic=False, forced=True)
+        if USE_SIMPLE_ENCODER:
+            self.encoder = SimpleFullWidthEncoder(n_inputs=self.N_INPUTS, n_cats=len(self.ALPHA))
+        else:
+            self.encoder = ScalarEncoder(n=self.N_INPUTS, w=5, minval=1, maxval=self.N_INPUTS, periodic=False, forced=True)
 
-        with open(filename, 'r') as myfile:
+        self.printer = CHTMPrinter(self.b, predictor=self.classifier)
+        self.printer.setup()
+
+        with open(self.DATA_DIR + "/" + filename, 'r') as myfile:
             self.data = myfile.read()
 
         self.cursor = 0
 
     def encode_letter(self, c):
-        if True:
-            # Manual encoding (simple)
-            i = ord(c) - 65 # A = 0
-            n_cats = len(self.ALPHA)
-            offset = n_cats*i
-            inputs = np.zeros(self.N_INPUTS)
-            inputs[offset:offset+n_cats] = 1
-            return inputs
-        else:
-            i = ord(c) - 64
-            return self.encoder.encode(i)
+        i = ord(c.upper()) - 65 # A == 0
+        return self.encoder.encode(i)
 
     def run(self):
         self.printer.window.after(self.delay, self.process)
@@ -66,10 +65,12 @@ class FileProcesser(object):
                 self.current_batch_counter += 1
                 char = self.data[self.cursor].upper()
                 inputs = self.encode_letter(char)
+                self.printer.set_raw_input(char)
                 self.b.process(inputs, learning=True)
                 if self.classifier:
                     self.classifier.read(char)
-
+                    prediction = self.classifier.predict()
+                    self.printer.set_prediction(prediction)
                 if self.animate:
                     self.printer.render()
             else:
@@ -97,11 +98,12 @@ class FileProcesser(object):
             if self.auto_predict:
                 predicted_stream = ""
                 for i in range(self.auto_predict):
+                    # Loop through predicting, and then processing prediction
                     prediction = self.classifier.predict()
                     predicted_stream += prediction
                     inputs = self.encode_letter(prediction)
                     self.b.process(inputs, learning=False)
-                print "Predicted: %s" % predicted_stream
+                print "Predicted stream:", predicted_stream
                 done = False
                 while not done:
                     next = raw_input("Enter next letter (q to exit) >> ")
@@ -110,9 +112,10 @@ class FileProcesser(object):
                         if done:
                             break
                         inputs = self.encode_letter(next)
+                        self.printer.set_raw_input(next)
                         self.b.process(inputs, learning=False)
                         prediction = self.classifier.predict()
-                        print "Prediction: %s" % prediction
+                        self.printer.set_prediction(prediction)
                         if self.animate:
                             self.printer.render()
 
@@ -125,7 +128,6 @@ class FileProcesser(object):
                         inputs = self.encode_letter(user_char)
                         self.b.process(inputs, learning=False)
                         prediction = self.classifier.predict()
-                        print "Prediction: %s" % prediction
 
         self.printer.window.destroy()
 

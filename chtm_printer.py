@@ -10,13 +10,46 @@ REGION_BUFFER = 20
 CELL_PX = 12
 GRID_OUTLINE = "#555555"
 VIEWABLE_SEGMENTS = 3
-INDICATOR_DIAMETER = CELL_PX / 3
+INDICATOR_DIAMETER = CELL_PX / 2
+LABEL_GAP = 30
+LABEL_SIZE = 10
+VALUE_SIZE = 25
 
 ################
 # TODO
 # Print segment activation (seems that some segments are not activating when they should)
 # Class for region printer to more gracefully handle multiple regions
 ################
+
+################
+# Chart Key
+# ---------
+
+# MAIN GRIDS
+# ----------
+# Blue - Inputs
+# Red - Activation
+#   * Colors are last step activation
+#   * White indicator: activating resultant from this step
+# Orange - Pre-activation (integration of bias and overlap, before winners picked)
+# Green - Overlap (activation from inputs via proximal segment)
+# Yellow - Bias & Post-Bias (distal/topdown influence)
+#   * White indicator (bias only): overlap matches bias (predicted input?)
+
+# SYNAPSE GRIDS
+# -------------
+# These show a detail for a single selected cell
+# Each grid shows connections from a particular distal segment
+# - Brightness of cell is permanence
+# - Orange outlines indicate synapses that are contributing
+# - Cell indicator indicates permanence increase (white) or decrease (black)
+# - Grid outlines:
+#   * Yellow: Active
+#   * Blue: Learning
+#   * Green: Learning AND Active
+
+
+# Note: topdown and proximal (feed-forward) connections not shown
 
 class VIEW():
     INPUTS = 1
@@ -25,6 +58,8 @@ class VIEW():
     BIAS = 4
     PREACTIVATION = 5
     SEGMENT_DETAIL = 6
+    POSTBIAS = 7
+    PREDICTOR = 8
 
     COLOR = {
         INPUTS: (0,0,255),
@@ -32,18 +67,23 @@ class VIEW():
         OVERLAP: (0,255,0),
         BIAS: (255,255,0),
         PREACTIVATION: (255,180,0),
-        SEGMENT_DETAIL: (0,255,255)
+        SEGMENT_DETAIL: (0,255,255),
+        POSTBIAS: (255,255,0),
+        PREDICTOR: (0,255,0)
     }
 
     LABEL = {
         ACTIVATION: "Activation",
         OVERLAP: "Overlap",
         BIAS: "Bias",
-        PREACTIVATION: "Preactivation"
+        PREACTIVATION: "Preactivation",
+        POSTBIAS: "Post-Bias",
+        PREDICTOR: "Predictor"
     }
 
     MAX_VALUE = {
         BIAS: 3,
+        POSTBIAS: 3,
         OVERLAP: 2
     }
 
@@ -58,18 +98,23 @@ class VIEW():
     def draw_activation(printer, region, index):
         '''
         Activation from this time step (before learning)
+
+        Returns:
+            tuple (3): value, indicator_color, outline_color
         '''
         ol = None
         if index == printer.focus_cell_index:
             ol = "#fff"
         value = region.last_activation[index]
         activating = region.cells[index].activation == 1.0
-        hl = "#fff" if activating else None
-        return (value, hl, ol)
+        indicator = "#fff" if activating else None
+        return (value, indicator, ol)
 
     @staticmethod
     def draw_preactivation(printer, region, index):
         '''
+        Returns:
+            tuple (3): value, indicator_color, outline_color
         '''
         ol = None
         if index == printer.focus_cell_index:
@@ -78,6 +123,10 @@ class VIEW():
 
     @staticmethod
     def draw_overlap(printer, region, index):
+        '''
+        Returns:
+            tuple (3): value, indicator_color, outline_color
+        '''
         ol = None
         if index == printer.focus_cell_index:
             ol = "#fff"
@@ -85,22 +134,37 @@ class VIEW():
 
     @staticmethod
     def draw_bias(printer, region, index):
+        '''
+        Returns:
+            tuple (3): value, indicator_color, outline_color
+        '''
         ol = None
         if index == printer.focus_cell_index:
             ol = "#fff"
-        overlap_match = region.bias[index] > 0 and region.overlap[index] > 0
+        overlap_match = region.last_bias[index] > 0 and region.overlap[index] > 0
         indicator = "#fff" if overlap_match else ""
-        if printer.view_active("next_bias"):
-            cell = region.cells[index]
-            for seg in cell.distal_segments:
-                active_after_current_activation = seg.active()
-                if active_after_current_activation:
-                    ol = "#FFFF00"
-                    continue
-        return (region.bias[index], indicator, ol)
+        return (region.last_bias[index], indicator, ol)
+
+    @staticmethod
+    def draw_post_bias(printer, region, index):
+        '''
+        Returns:
+            tuple (3): value, indicator_color, outline_color
+        '''
+        ol = None
+        if index == printer.focus_cell_index:
+            ol = "#fff"
+        return (region.bias[index], None, ol)
 
     @staticmethod
     def draw_cell_synapses(printer, cell, index, segment_index=0):
+        '''
+        Draw a single grid showing synapses for one distal segment
+
+        Strength of blue color indicates permanence of synapse
+        Orange outlines indicate synapses that are contributing
+        Indicator indicates permanence increase (white) or decrease (black)
+        '''
         perm = 0
         indicator = None
         ol = None
@@ -133,14 +197,14 @@ class VIEW():
             learning = any(seg.syn_last_change)
             active = seg.active_before_learning
             if learning and active:
-                return "#FFFF55"
+                return "#5aff68"
             elif learning:
                 return "#00CCFF"
             elif active:
                 return "#FFFF00"
         return ""
 
-    DRAW = [ACTIVATION, PREACTIVATION, OVERLAP, BIAS]
+    DRAW = [BIAS, OVERLAP, PREACTIVATION, ACTIVATION, POSTBIAS]
 
 DRAW_FN = {
     VIEW.INPUTS: VIEW.draw_input,
@@ -148,27 +212,33 @@ DRAW_FN = {
     VIEW.PREACTIVATION: VIEW.draw_preactivation,
     VIEW.OVERLAP: VIEW.draw_overlap,
     VIEW.BIAS: VIEW.draw_bias,
+    VIEW.POSTBIAS: VIEW.draw_post_bias
 }
 
 class CHTMPrinter(object):
 
-    def __init__(self, brain):
+    def __init__(self, brain, predictor=None):
         self.brain = brain
-        self.window = None
-        self.canvas = None
-        self.cell_window = None
-        self.cell_canvas = None
+        self.predictor = predictor
+        self.window, self.canvas = None, None
+        self.cell_window, self.cell_canvas = None, None
+        self.predictor_window, self.predictor_canvas = None, None
+
         self.focus_cell_index = None
         self.rolling_bias_match = []
         self.menubar = None
 
         # State
-        self.view_toggles = ["next_bias"]
+        self.view_toggles = []
+        self.last_raw_input = None
+        self.raw_input = None
+        self.prediction = None
 
         # Canvas items
-        self.rolling_match_text = None
+        self.labeled_values = {} # string key -> canvas item
         self.main_grids = []
-        self.focus_grids = []
+        self.cell_grids = []
+        self.predictor_grids = []
 
     def setup(self):
         self.window = Tk()
@@ -181,7 +251,7 @@ class CHTMPrinter(object):
 
         # Create input grid
         draw_fn = partial(VIEW.draw_input, self)
-        input_rc = CellGrid(REGION_BUFFER, top, self.brain.n_inputs, canvas=self.canvas, cell_draw_fn=draw_fn, view_type=VIEW.INPUTS) # Inputs
+        input_rc = CellGrid(REGION_BUFFER, top, self.brain.n_inputs, canvas=self.canvas, cell_draw_fn=draw_fn, view_type=VIEW.INPUTS, title="Inputs") # Inputs
         self.main_grids.append(input_rc)
         x, _y = input_rc.bottom_right()
 
@@ -214,7 +284,10 @@ class CHTMPrinter(object):
         self.canvas.config(width=main_width, height=main_height)
         self.canvas.pack()
 
-        self.rolling_match_text = self.canvas.create_text(main_width / 6, main_height - 100, fill="#000", font=("Purisa", 25), anchor="w")
+        self._setup_labeled_value("last_input", label="Last Input", x=input_rc.x_middle(), y=main_height - 220, color="#CCC")
+        self._setup_labeled_value("raw_input", label="Raw Input", x=input_rc.x_middle(), y=main_height - 180, color="#000")
+        self._setup_labeled_value("prediction", label="Prediction", x=input_rc.x_middle(), y=main_height - 140, color="#ccc12a")
+        self._setup_labeled_value("rolling_match", label="Rolling Match", x=input_rc.x_middle(), y=main_height - 100, color="#000")
 
         # Cell detail window & canvas
         width = max_side + 2*REGION_BUFFER
@@ -227,25 +300,59 @@ class CHTMPrinter(object):
             draw_fn = None
             grid_outline_fn = None
             on_cell_click = partial(self.focus_synapse, r, i)
-            cg = CellGrid(REGION_BUFFER, (i * (max_side + REGION_BUFFER)) + REGION_BUFFER, r.n_cells, canvas=self.cell_canvas, window=self.window, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=0.5, on_cell_click=on_cell_click)
-            self.focus_grids.append(cg)
+            cg = CellGrid(REGION_BUFFER, (i * (max_side + REGION_BUFFER)) + REGION_BUFFER, r.n_cells, canvas=self.cell_canvas, window=self.window, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=0.5, on_cell_click=on_cell_click, title="Synapses - S%d" % (i+1))
+            self.cell_grids.append(cg)
+
+        # Predictor window & canvas
+        if self.predictor:
+            raw_inputs = self.predictor.categories
+            pwidth = len(raw_inputs) * (max_side + REGION_BUFFER) + REGION_BUFFER
+            pheight = max_side + 2*REGION_BUFFER
+            self.predictor_window = Toplevel()
+            self.predictor_canvas = Canvas(self.predictor_window, width=pwidth, height=pheight)
+            self.predictor_canvas.pack()
+
+            x = REGION_BUFFER
+            for ri in raw_inputs:
+                draw_fn = partial(self.predictor.overlap_lookup_draw_fn, ri)
+                cg = CellGrid(x, REGION_BUFFER, r.n_cells, canvas=self.predictor_canvas, window=self.predictor_window, view_type=VIEW.PREDICTOR, cell_draw_fn=draw_fn, saturate_value=0.2, max_value=0.5, title=ri)
+                self.cell_grids.append(cg)
+                x += max_side + REGION_BUFFER
 
         # Initialize all cell grids
         for cg in self.main_grids:
             cg.initialize()
-        for cg in self.focus_grids:
+        for cg in self.cell_grids:
             cg.initialize()
+        if self.predictor:
+            for cg in self.predictor_grids:
+                cg.initialize()
 
         # Create menu
         self.menubar = Menu(self.window)
         action_menu = Menu(self.menubar, tearoff=0)
-        action_menu.add_command(label="Toggle Next Bias Showing", command=partial(self.toggle_view, 'next_bias'))
+        # action_menu.add_command(label="Toggle Next Bias Showing", command=partial(self.toggle_view, 'next_bias'))
         action_menu.add_command(label="Segment Activation Showing", command=partial(self.toggle_view, 'segment_activation'))
         self.menubar.add_cascade(label="Action", menu=action_menu)
         self.window.config(menu=self.menubar)
 
+        cell_width = width
         # Move main window to right of cell
-        self.window.geometry('%dx%d+%d+%d' % (main_width, main_height, width, 0))
+        self.window.geometry('%dx%d+%d+%d' % (main_width, main_height, cell_width, 0))
+        # Move predictor window to right of main window
+        if self.predictor:
+            self.predictor_window.geometry('%dx%d+%d+%d' % (pwidth, pheight, cell_width + main_width, 0))
+
+    def _setup_labeled_value(self, key, label="Label", value="N/A", x=0, y=0, color="#000"):
+        # Setup label
+        self.canvas.create_text(x, y - LABEL_GAP, fill=color, font=("Purisa", LABEL_SIZE), anchor="s", text=label)
+        # Setup value
+        self.labeled_values[key] = self.canvas.create_text(x, y, fill=color, font=("Purisa", VALUE_SIZE), anchor="s")
+
+    def _update_labeled_value(self, key, value="N/A"):
+        lv = self.labeled_values.get(key)
+        if lv:
+            self.canvas.itemconfig(lv, text=value)
 
     def toggle_view(self, toggle):
         if toggle in self.view_toggles:
@@ -256,21 +363,36 @@ class CHTMPrinter(object):
     def view_active(self, view):
         return view in self.view_toggles
 
+    def set_raw_input(self, ri):
+        if self.raw_input:
+            self.last_raw_input = self.raw_input
+        self.raw_input = ri
+
+    def set_prediction(self, prediction):
+        self.prediction = prediction
+
     def render(self):
-        for cg in self.main_grids + self.focus_grids:
+        for cg in self.main_grids + self.cell_grids + self.predictor_grids:
             cg.render(self.focus_cell_index)
 
         r = self.brain.regions[0]
-        bias_count = float(sum(r.bias > 0))
+        bias_count = float(sum(r.last_bias > 0))
         if bias_count > 0:
-            bias_match = sum(np.logical_and(r.bias > 0, r.overlap > 0))
+            bias_match = sum(np.logical_and(r.last_bias > 0, r.overlap > 0))
             ratio = bias_match / bias_count
         else:
             ratio = 0
         if ratio:
             util.rolling_list(self.rolling_bias_match, length=5, new_value=ratio)
         rolling_average = util.average(self.rolling_bias_match)
-        self.canvas.itemconfig(self.rolling_match_text, text="%.2f" % rolling_average)
+        self._update_labeled_value('rolling_match', value="%.2f" % rolling_average)
+        if self.last_raw_input:
+            self._update_labeled_value('last_input', value=self.last_raw_input)
+        if self.raw_input:
+            self._update_labeled_value('raw_input', value=self.raw_input)
+        if self.prediction:
+            self._update_labeled_value('prediction', value=self.prediction)
+
 
     def focus_cell(self, region, index):
         if index < len(region.cells):
@@ -278,7 +400,7 @@ class CHTMPrinter(object):
             cell = region.cells[index]
             self.cell_window.wm_title("Cell %d" % index)
             print "Focusing on %s" % (cell)
-            for si, cg in enumerate(self.focus_grids):
+            for si, cg in enumerate(self.cell_grids):
                 cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=si)
                 cg.grid_outline_fn = partial(VIEW.segment_learning, cell, segment_index=si)
                 cg.render()
@@ -335,6 +457,7 @@ class CellGrid(object):
             x_br = abs_x + INDICATOR_DIAMETER
             y_br = abs_y + INDICATOR_DIAMETER
             hl_indicator = self.canvas.create_oval(abs_x, abs_y, x_br, y_br, fill="", outline="")
+            self.canvas.tag_bind(hl_indicator, "<Button-1>", self.handle_click)
             self.hl_indicators.append(hl_indicator)
         if self.title:
             self.canvas.create_text((self.x, self.y - 9), text=self.title, fill="#000", font=("Purisa", 11), anchor="w")
@@ -361,6 +484,9 @@ class CellGrid(object):
         else:
             state = "hidden"
         self.canvas.itemconfig(self.hl_indicators[index], fill=indicator_color, outline=indicator_outline, state=state)
+
+    def x_middle(self):
+        return self.x + (self.side / 2)*CELL_PX
 
     def handle_click(self, event):
         coordx = int((event.x - self.x) / CELL_PX)
