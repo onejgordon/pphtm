@@ -9,7 +9,7 @@ from util import printarray
 # Settings
 
 VERBOSITY = 1
-PROXIMAL_ACTIVATION_THRESHHOLD = 2 # Activation threshold for a segment. If the number of active connected synapses in a segment is greater than activationThreshold, the segment is said to be active.
+PROXIMAL_ACTIVATION_THRESHHOLD = 3 # Activation threshold for a segment. If the number of active connected synapses in a segment is greater than activationThreshold, the segment is said to be active.
 DISTAL_ACTIVATION_THRESHOLD = 2
 DEF_MIN_OVERLAP = 2
 CONNECTED_PERM = 0.2  # If the permanence value for a synapse is greater than this value, it is said to be connected.
@@ -18,20 +18,20 @@ BOOST_MULTIPLIER = 1.3
 INHIBITION_RADIUS_DISCOUNT = 0.8
 INIT_PERMANENCE = 0.2  # New learned synapses
 INIT_PERMANENCE_JITTER = 0.05  # Max offset from CONNECTED_PERM when initializing synapses
-SYNAPSE_ACTIVATION_LEARN_THRESHHOLD = 0.8
+SYNAPSE_ACTIVATION_LEARN_THRESHHOLD = 1.0
 INIT_PERMANENCE_LEARN_INC_CHANGE = 0.03
-INIT_PERMANENCE_LEARN_DEC_CHANGE = 0.005
+INIT_PERMANENCE_LEARN_DEC_CHANGE = 0.003
 DESIRED_LOCAL_ACTIVITY = 2
 DO_BOOSTING = True
-CHANCE_OF_INHIBITORY = 0.0
+CHANCE_OF_INHIBITORY = 0.2
 DISTAL_BIAS_EFFECT, OVERLAP_EFFECT = (0.6, 0.6)
 T_START_BOOSTING = 0
-MIN_FADE_RATE, MAX_FADE_RATE = (0.2, 0.5)
+MIN_FADE_RATE, MAX_FADE_RATE = (0.5, 0.9)
 
-DISTAL_SYNAPSE_CHANCE = 0.4
+DISTAL_SYNAPSE_CHANCE = 0.5
 TOPDOWN_SYNAPSE_CHANCE = 0.4
-MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.3
-MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.05
+MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.4
+MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.1
 
 DISTAL_SEGMENTS = 3
 PROX_SEGMENTS = 2
@@ -62,8 +62,9 @@ class Segment(object):
         # Synapses (all lists below len == # of synapses)
         self.syn_sources = [] # Index of source (either input or cell in region, or above)
         self.syn_permanences = [] # (0,1)
-        self.syn_last_change = [] # -1, 0 1
-        self.syn_last_contribution = []
+        self.syn_change = [] # -1, 0 1 (after step)
+        self.syn_prestep_contribution = [] # (after step)
+        self.syn_contribution = [] # (after step)
 
         # State
         self.active_before_learning = False
@@ -117,8 +118,9 @@ class Segment(object):
             permanence = CONNECTED_PERM + INIT_PERMANENCE_JITTER*(random.random()-0.5)
         self.syn_sources.append(source_index)
         self.syn_permanences.append(permanence)
-        self.syn_last_change.append(0)
-        self.syn_last_contribution.append(0)
+        self.syn_change.append(0)
+        self.syn_prestep_contribution.append(0)
+        self.syn_contribution.append(0)
 
     def synapse_state(self, index=0):
         '''
@@ -127,9 +129,9 @@ class Segment(object):
         last_change = permanence = contribution = None
         if index in self.syn_sources:
             syn_index = self.syn_sources.index(index)
-            last_change = self.syn_last_change[syn_index]
+            last_change = self.syn_change[syn_index]
             permanence = self.syn_permanences[syn_index]
-            contribution = self.syn_last_contribution[syn_index]
+            contribution = self.syn_contribution[syn_index]
         return (permanence, contribution, last_change)
 
     def source_cell(self, synapse_index=0):
@@ -256,9 +258,9 @@ class Cell(object):
             distal.initialize() # Creates synapses
             self.distal_segments.append(distal)
         for i in range(self.n_topdown_segments):
-            distal = Segment(self, i, self.region, type=Segment.TOPDOWN)
-            distal.initialize() # Creates synapses
-            self.topdown_segments.append(distal)
+            topdown = Segment(self, i, self.region, type=Segment.TOPDOWN)
+            topdown.initialize() # Creates synapses
+            self.topdown_segments.append(topdown)
         log("Initialized %s" % self)
 
     def active_segments(self, type=Segment.PROXIMAL):
@@ -307,6 +309,10 @@ class Cell(object):
         for seg in segs:
             synapses.extend(seg.connected_synapses())
         return synapses
+
+    def count_distal_connections(self, cell_index):
+        synapses = self.connected_synapses(type=Segment.DISTAL)
+        return synapses.count(cell_index)
 
     def most_active_distal_segment(self):
         return sorted(self.distal_segments, key=lambda seg : seg.total_activation(), reverse=True)[0]
@@ -509,24 +515,25 @@ class Region(object):
         '''
         n_inc = n_dec = n_conn = n_discon = 0
         for i in range(seg.n_synapses()):
-            seg.syn_last_change[i] = 0
+            seg.syn_change[i] = 0
             was_connected = seg.connected(i)
             cell = seg.source_cell(i)
             cell_excitatory = not cell or cell.excitatory # Inputs excitatory
+            seg.syn_prestep_contribution[i] = seg.syn_contribution[i]
             contribution = seg.contribution(i, absolute=True)
             contributor = contribution >= SYNAPSE_ACTIVATION_LEARN_THRESHHOLD
-            seg.syn_last_contribution[i] = contribution
+            seg.syn_contribution[i] = contribution
             increase_permanence = (is_activating and cell_excitatory and contributor) or (not is_activating and not cell_excitatory and contributor)
             if increase_permanence and seg.syn_permanences[i] < 1.0:
                 n_inc += 1
                 seg.syn_permanences[i] += self.permanence_inc
                 seg.syn_permanences[i] = min(1.0, seg.syn_permanences[i])
-                seg.syn_last_change[i] += 1
+                seg.syn_change[i] += 1
             elif not increase_permanence and seg.syn_permanences[i] > 0.0:
                 n_dec +=1
                 seg.syn_permanences[i] -= self.permanence_dec
                 seg.syn_permanences[i] = max(0.0, seg.syn_permanences[i])
-                seg.syn_last_change[i] -= 1
+                seg.syn_change[i] -= 1
             connection_changed = was_connected != seg.connected(i)
             if connection_changed:
                 connected = not was_connected
@@ -573,7 +580,7 @@ class Region(object):
                 else:
                     # Re-initialize change state
                     seg.decay_permanences()
-                    seg.syn_last_change = [0 for x in seg.syn_last_change]
+                    seg.syn_change = [0 for x in seg.syn_change]
 
 
         log("Distal: +%d/-%d (%d connected, %d disconnected)" % (n_increased_dist, n_decreased_dist, n_conn_dist, n_discon_dist))
@@ -632,6 +639,7 @@ class Region(object):
             log("%s << Overlap Duty Cycle" % printarray(self.overlap_duty_cycle, continuous=True), level=2)
             self.do_learning(activating)
 
+
         # Phase 4: Calculate new activations
         # Save pre-step activations
         self.last_activation = [cell.activation for cell in self.cells]
@@ -644,6 +652,7 @@ class Region(object):
             if cell.activation < 0:
                 cell.activation = 0.0
         log("%s << Activations" % self.print_cells(), level=2)
+
 
         # Phase 5: Calculate Distal Biases (TM?)
         self.last_bias = np.copy(self.bias)

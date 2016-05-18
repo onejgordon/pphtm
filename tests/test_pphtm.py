@@ -18,7 +18,7 @@ class FileProcesser(object):
     ALPHA = "ABCDEF"
     CROP_FILE = 300
     N_INPUTS = 36
-    CPR = [6**2, 6**2]
+    CPR = [9**2]
     auto_predict = 16
 
     def __init__(self, filename="simple_pattern2.txt", with_classifier=True, delay=50, animate=True):

@@ -77,14 +77,3 @@ class PPHTMPredictor(object):
         if raw_input:
             self.overlap_lookup[raw_input] = np.copy(self.region.overlap)
 
-    def overlap_lookup_draw_fn(self, raw_input, index):
-        last_overlap_for_input = self.overlap_lookup.get(raw_input)
-        value = 0
-        if last_overlap_for_input is not None:
-            value = last_overlap_for_input[index]
-        ind_color = ol_color = None
-        bias = self.region.bias[index]
-        if value and bias:
-            ind_color = "#FF0000"
-        return (value, ind_color, ol_color)
-

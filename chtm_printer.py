@@ -7,7 +7,7 @@ from functools import partial
 import numpy as np
 
 REGION_BUFFER = 20
-CELL_PX = 12
+CELL_PX = 10
 GRID_OUTLINE = "#555555"
 VIEWABLE_SEGMENTS = 3
 INDICATOR_DIAMETER = CELL_PX / 2
@@ -157,7 +157,7 @@ class VIEW():
         return (region.bias[index], None, ol)
 
     @staticmethod
-    def draw_cell_synapses(printer, cell, index, segment_index=0):
+    def draw_cell_synapses(printer, cell, index, segment_index=0, post_step=False):
         '''
         Draw a single grid showing synapses for one distal segment
 
@@ -176,8 +176,12 @@ class VIEW():
                 # There is a synapse here
                 syn_index = seg.syn_sources.index(index)
                 perm = seg.syn_permanences[syn_index]
-                change = seg.syn_last_change[syn_index]
-                contribution = seg.syn_last_contribution[syn_index]
+                change = 0
+                if post_step:
+                    change = seg.syn_change[syn_index]
+                    contribution = seg.syn_contribution[syn_index]
+                else:
+                    contribution = seg.syn_prestep_contribution[syn_index]
                 ol = "#F36B1D" if contribution > 0.5 else ""
                 if change == 0:
                     indicator = None
@@ -191,10 +195,10 @@ class VIEW():
     # These methods return a color for the full grid's outline
 
     @staticmethod
-    def segment_learning(cell, segment_index=0):
+    def segment_learning(cell, segment_index=0, post_step=False):
         if segment_index < len(cell.distal_segments):
             seg = cell.distal_segments[segment_index]
-            learning = any(seg.syn_last_change)
+            learning = any(seg.syn_change)
             active = seg.active_before_learning
             if learning and active:
                 return "#5aff68"
@@ -288,6 +292,7 @@ class CHTMPrinter(object):
         self._setup_labeled_value("raw_input", label="Raw Input", x=input_rc.x_middle(), y=main_height - 180, color="#000")
         self._setup_labeled_value("prediction", label="Prediction", x=input_rc.x_middle(), y=main_height - 140, color="#ccc12a")
         self._setup_labeled_value("rolling_match", label="Rolling Match", x=input_rc.x_middle(), y=main_height - 100, color="#000")
+        self._setup_labeled_value("time", label="Time Step", x=input_rc.x_middle(), y=main_height - 60, color="#000")
 
         # Cell detail window & canvas
         width = max_side + 2*REGION_BUFFER
@@ -304,6 +309,7 @@ class CHTMPrinter(object):
             self.cell_grids.append(cg)
 
         # Predictor window & canvas
+
         if self.predictor:
             raw_inputs = self.predictor.categories
             pwidth = len(raw_inputs) * (max_side + REGION_BUFFER) + REGION_BUFFER
@@ -314,9 +320,9 @@ class CHTMPrinter(object):
 
             x = REGION_BUFFER
             for ri in raw_inputs:
-                draw_fn = partial(self.predictor.overlap_lookup_draw_fn, ri)
+                draw_fn = partial(self.predictor_draw_fn, ri)
                 cg = CellGrid(x, REGION_BUFFER, r.n_cells, canvas=self.predictor_canvas, window=self.predictor_window, view_type=VIEW.PREDICTOR, cell_draw_fn=draw_fn, saturate_value=0.2, max_value=0.5, title=ri)
-                self.cell_grids.append(cg)
+                self.predictor_grids.append(cg)
                 x += max_side + REGION_BUFFER
 
         # Initialize all cell grids
@@ -333,6 +339,8 @@ class CHTMPrinter(object):
         action_menu = Menu(self.menubar, tearoff=0)
         # action_menu.add_command(label="Toggle Next Bias Showing", command=partial(self.toggle_view, 'next_bias'))
         action_menu.add_command(label="Segment Activation Showing", command=partial(self.toggle_view, 'segment_activation'))
+        action_menu.add_command(label="Segment Post Step", command=partial(self.toggle_view, 'segment_post_step'))
+        action_menu.add_command(label="Show Predicted Associations", command=partial(self.toggle_view, 'predicted_associations'))
         self.menubar.add_cascade(label="Action", menu=action_menu)
         self.window.config(menu=self.menubar)
 
@@ -354,10 +362,39 @@ class CHTMPrinter(object):
         if lv:
             self.canvas.itemconfig(lv, text=value)
 
+    def predictor_draw_fn(self, raw_input, index):
+        region = self.predictor.region
+        last_overlap_for_input = self.predictor.overlap_lookup.get(raw_input)
+        value = 0
+        if last_overlap_for_input is not None:
+            value = last_overlap_for_input[index]
+        ind_color = ol_color = None
+        bias = region.bias[index]
+        cell = region.cells[index]
+        predicted = value and bias
+        associated = False
+        if value and self.view_active("predicted_associations"):
+            # Highlight cells with distal links to any predicted cells
+            indexes = np.nonzero(region.bias)
+            for idx in indexes[0]:
+                distal_connections_to_focus = cell.count_distal_connections(idx)
+                if distal_connections_to_focus > 0:
+                    associated = True
+                    break
+        if associated and predicted:
+            ind_color = "#FF8C0C"
+        elif associated:
+            ind_color = "#FFF10C"
+        elif predicted:
+            ind_color = "#FF1A0E"
+        return (value, ind_color, ol_color)
+
     def toggle_view(self, toggle):
         if toggle in self.view_toggles:
+            print "Disabling", toggle
             self.view_toggles.remove(toggle)
         else:
+            print "Enabling", toggle
             self.view_toggles.append(toggle)
 
     def view_active(self, view):
@@ -392,7 +429,7 @@ class CHTMPrinter(object):
             self._update_labeled_value('raw_input', value=self.raw_input)
         if self.prediction:
             self._update_labeled_value('prediction', value=self.prediction)
-
+        self._update_labeled_value('time', value=str(self.brain.t))
 
     def focus_cell(self, region, index):
         if index < len(region.cells):
@@ -401,8 +438,12 @@ class CHTMPrinter(object):
             self.cell_window.wm_title("Cell %d" % index)
             print "Focusing on %s" % (cell)
             for si, cg in enumerate(self.cell_grids):
-                cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=si)
-                cg.grid_outline_fn = partial(VIEW.segment_learning, cell, segment_index=si)
+                post_step = self.view_active('segment_post_step')
+                cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=si, post_step=post_step)
+                cg.grid_outline_fn = partial(VIEW.segment_learning, cell, segment_index=si, post_step=post_step)
+                cg.render()
+
+            for si, cg in enumerate(self.predictor_grids):
                 cg.render()
 
     def focus_synapse(self, region, segment_index, index):
