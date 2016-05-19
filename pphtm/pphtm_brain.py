@@ -6,32 +6,22 @@ import math
 import util
 from util import printarray
 
-# Settings
+# Settings (global vars, other vars set in brain.__init__)
 
 VERBOSITY = 1
-PROXIMAL_ACTIVATION_THRESHHOLD = 3 # Activation threshold for a segment. If the number of active connected synapses in a segment is greater than activationThreshold, the segment is said to be active.
-DISTAL_ACTIVATION_THRESHOLD = 2
 DEF_MIN_OVERLAP = 2
 CONNECTED_PERM = 0.2  # If the permanence value for a synapse is greater than this value, it is said to be connected.
 DUTY_HISTORY = 100
-BOOST_MULTIPLIER = 1.3
 INHIBITION_RADIUS_DISCOUNT = 0.8
 INIT_PERMANENCE = 0.2  # New learned synapses
 INIT_PERMANENCE_JITTER = 0.05  # Max offset from CONNECTED_PERM when initializing synapses
 SYNAPSE_ACTIVATION_LEARN_THRESHHOLD = 1.0
 INIT_PERMANENCE_LEARN_INC_CHANGE = 0.03
 INIT_PERMANENCE_LEARN_DEC_CHANGE = 0.003
-DESIRED_LOCAL_ACTIVITY = 2
-DO_BOOSTING = True
 CHANCE_OF_INHIBITORY = 0.2
 DISTAL_BIAS_EFFECT, OVERLAP_EFFECT = (0.6, 0.6)
 T_START_BOOSTING = 0
 MIN_FADE_RATE, MAX_FADE_RATE = (0.5, 0.9)
-
-DISTAL_SYNAPSE_CHANCE = 0.5
-TOPDOWN_SYNAPSE_CHANCE = 0.4
-MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.4
-MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.1
 
 DISTAL_SEGMENTS = 3
 PROX_SEGMENTS = 2
@@ -83,7 +73,7 @@ class Segment(object):
                 input_x, input_y = util.coords_from_index(source, self.region._input_side_len())
                 dist = util.distance((cell_x, cell_y), (input_x, input_y))
                 max_distance = self.region.diagonal
-                chance_of_synapse = ((MAX_PROXIMAL_INIT_SYNAPSE_CHANCE - MIN_PROXIMAL_INIT_SYNAPSE_CHANCE) * (1 - float(dist)/max_distance)) + MIN_PROXIMAL_INIT_SYNAPSE_CHANCE
+                chance_of_synapse = ((self.region.brain.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE - self.region.brain.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE) * (1 - float(dist)/max_distance)) + self.region.brain.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(source)
@@ -93,14 +83,14 @@ class Segment(object):
                 if index == cell_index:
                     # Avoid creating synapse with self
                     continue
-                chance_of_synapse = DISTAL_SYNAPSE_CHANCE
+                chance_of_synapse = self.region.brain.DISTAL_SYNAPSE_CHANCE
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(index, permanence=0.15)
         else:
             # Top down connections
             for index in range(self.region.n_cells_above):
-                chance_of_synapse = TOPDOWN_SYNAPSE_CHANCE
+                chance_of_synapse = self.region.brain.TOPDOWN_SYNAPSE_CHANCE
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(index, permanence=0.15)
@@ -204,7 +194,7 @@ class Segment(object):
     def active(self):
         '''
         '''
-        threshold = PROXIMAL_ACTIVATION_THRESHHOLD if self.proximal() else DISTAL_ACTIVATION_THRESHOLD
+        threshold = self.region.brain.PROXIMAL_ACTIVATION_THRESHHOLD if self.proximal() else self.region.brain.DISTAL_ACTIVATION_THRESHOLD
         return self.total_activation() > threshold
 
     def n_synapses(self):
@@ -433,7 +423,7 @@ class Region(object):
         if self.active_duty_cycle[c] >= min_duty_cycle:
             b = 1.0
         else:
-            b = 1 + (min_duty_cycle - self.active_duty_cycle[c]) * BOOST_MULTIPLIER
+            b = 1 + (min_duty_cycle - self.active_duty_cycle[c]) * self.brain.BOOST_MULTIPLIER
         return b
 
     def _increase_permanences(self, c, increase, excitatory_only=False, type="proximal"):
@@ -499,7 +489,7 @@ class Region(object):
         for c in self.cells:
             pa = self.pre_activation[c.index]
             neighbors = self._neighbors_of(c)
-            kth_score = self._kth_score(neighbors, self.pre_activation, k=DESIRED_LOCAL_ACTIVITY)
+            kth_score = self._kth_score(neighbors, self.pre_activation, k=self.brain.DESIRED_LOCAL_ACTIVITY)
             if pa > 0 and pa >= kth_score:
                 active[c.index] = True
         return active
@@ -593,7 +583,7 @@ class Region(object):
             cell_active = activating[i]
             sufficient_overlap = self.overlap[i] > self.brain.min_overlap
             cell.update_duty_cycles(active=cell_active, overlap=sufficient_overlap)
-            if DO_BOOSTING and self.brain.t > T_START_BOOSTING:
+            if self.brain.DO_BOOSTING and self.brain.t > T_START_BOOSTING:
                 self.boost[i] = self._boost_function(i, min_duty_cycle)  # Updates boost value for cell (higher if below min)
 
                 # Check if overlap duty cycle less than minimum (note: min is calculated from max *active* not overlap)
@@ -701,26 +691,62 @@ class PPHTMBrain(object):
     Predictive Processing implementation of HTM.
     '''
 
+
     def __init__(self, cells_per_region=None, min_overlap=DEF_MIN_OVERLAP, r1_inputs=1):
         self.regions = []
         self.t = 0
         self.active_behaviors = []
         self.cells_per_region = cells_per_region
+        self.inputs = None
+
+        # Brain config
         self.n_inputs = r1_inputs
         self.min_overlap = min_overlap # A minimum number of inputs that must be active for a column to be considered during the inhibition step
-        self.inputs = None
+        # Defaults
+        self.PROXIMAL_ACTIVATION_THRESHHOLD = 3 # Activation threshold for a segment. If the number of active connected synapses in a segment is greater than activationThreshold, the segment is said to be active.
+        self.DISTAL_ACTIVATION_THRESHOLD = 2
+        self.BOOST_MULTIPLIER = 1.3
+        self.DESIRED_LOCAL_ACTIVITY = 2
+        self.DO_BOOSTING = 1
+        self.DISTAL_SYNAPSE_CHANCE = 0.5
+        self.TOPDOWN_SYNAPSE_CHANCE = 0.4
+        self.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.4
+        self.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.1
 
     def __repr__(self):
         return "<PPHTMBrain regions=%d>" % len(self.regions)
 
-    def initialize(self):
+    def initialize(self, **params):
+        if 'PROXIMAL_ACTIVATION_THRESHHOLD' in params:
+            self.PROXIMAL_ACTIVATION_THRESHHOLD = params.get('PROXIMAL_ACTIVATION_THRESHHOLD')
+        if 'DISTAL_ACTIVATION_THRESHOLD' in params:
+            self.DISTAL_ACTIVATION_THRESHOLD = params.get('DISTAL_ACTIVATION_THRESHOLD')
+        if 'BOOST_MULTIPLIER' in params:
+            self.BOOST_MULTIPLIER = params.get('BOOST_MULTIPLIER')
+        if 'DESIRED_LOCAL_ACTIVITY' in params:
+            self.DESIRED_LOCAL_ACTIVITY = params.get('DESIRED_LOCAL_ACTIVITY')
+        if 'DO_BOOSTING' in params:
+            self.DO_BOOSTING = params.get('DO_BOOSTING')
+        if 'DISTAL_SYNAPSE_CHANCE' in params:
+            self.DISTAL_SYNAPSE_CHANCE = params.get('DISTAL_SYNAPSE_CHANCE')
+        if 'TOPDOWN_SYNAPSE_CHANCE' in params:
+            self.TOPDOWN_SYNAPSE_CHANCE = params.get('TOPDOWN_SYNAPSE_CHANCE')
+        if 'MAX_PROXIMAL_INIT_SYNAPSE_CHANCE' in params:
+            self.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = params.get('MAX_PROXIMAL_INIT_SYNAPSE_CHANCE')
+        if 'MIN_PROXIMAL_INIT_SYNAPSE_CHANCE' in params:
+            self.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = params.get('MIN_PROXIMAL_INIT_SYNAPSE_CHANCE')
+
         n_inputs = self.n_inputs
+
+        # Initialize and create regions and cells
+        self.regions = []
         for i, cpr in enumerate(self.cells_per_region):
             top_region = i == len(self.cells_per_region) - 1
             r = Region(self, i, n_inputs=n_inputs, n_cells=cpr, n_cells_above=cpr if not top_region else 0)
             r.initialize()
             n_inputs = cpr  # Next region will have 1 input for each output cell
             self.regions.append(r)
+        self.t = 0
         print "Initialized %s" % self
 
     def process(self, readings, learning=False):

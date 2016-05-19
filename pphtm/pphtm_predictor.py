@@ -17,11 +17,16 @@ class PPHTMPredictor(object):
     def __init__(self, brain, categories):
         self.brain = brain
         self.categories = categories
-        self.region = brain.regions[0]
+        self.region = None
         self.overlap_lookup = {} # raw_input (e.g. letter) -> overlap np.array
         # Tallies counts number of 'votes' for each input based on proximal connections
         # of r0 biased cells
-        self.encoder = SimpleFullWidthEncoder(n_inputs=self.region.n_inputs, n_cats=len(categories))
+        self.encoder = SimpleFullWidthEncoder(n_inputs=self.brain.n_inputs, n_cats=len(categories))
+
+    def initialize(self):
+        self.region = self.brain.regions[0]
+        self.overlap_lookup = {}
+
 
     def predict_via_overlap_lookup(self):
         '''

@@ -2,9 +2,9 @@
 import sys
 from os import path
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
-from pphtm_brain import PPHTMBrain
-from chtm_printer import CHTMPrinter
-from pphtm_predictor import PPHTMPredictor
+from pphtm.pphtm_brain import PPHTMBrain
+from chtm.chtm_printer import CHTMPrinter
+from pphtm.pphtm_predictor import PPHTMPredictor
 import numpy as np
 
 from nupic.encoders.scalar import ScalarEncoder
@@ -16,7 +16,7 @@ class FileProcesser(object):
 
     DATA_DIR = "data"
     ALPHA = "ABCDEF"
-    CROP_FILE = 300
+    CROP_FILE = 200
     N_INPUTS = 36
     CPR = [9**2]
     auto_predict = 16
@@ -31,6 +31,7 @@ class FileProcesser(object):
         self.delay = delay
         if with_classifier:
             self.classifier = PPHTMPredictor(self.b, categories=self.ALPHA)
+            self.classifier.initialize()
 
         if USE_SIMPLE_ENCODER:
             self.encoder = SimpleFullWidthEncoder(n_inputs=self.N_INPUTS, n_cats=len(self.ALPHA))
