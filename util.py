@@ -22,8 +22,24 @@ def average(li):
     else:
         return 0
 
+
+def rolling_list(li, length=10, new_value=None, new_at_end=True):
+    curr_length = len(li)
+    if curr_length >= length:
+        if new_at_end:
+            li.pop(0) # Remove first
+        else:
+            li.pop() # Remove last
+    if new_at_end:
+        li.append(new_value)
+    else:
+        li.insert(0, new_value)
+    return li
+
+
 def toScreen(arr, resolution=30):
     return [j * resolution for j in arr]
+
 
 def distance(p1, p2):
     return abs(math.sqrt(sum([pow(x2 - x1, 2) for x1, x2 in zip(p1, p2)])))
@@ -75,3 +91,34 @@ def rotation_matrix(axis, theta):
     return np.array([[aa+bb-cc-dd, 2*(bc+ad), 2*(bd-ac)],
                      [2*(bc-ad), aa+cc-bb-dd, 2*(cd+ab)],
                      [2*(bd+ac), 2*(cd-ab), aa+dd-bb-cc]])
+
+def printarray(array, coerce_to_int=True, continuous=False):
+    if continuous:
+        # Takes an array of doubles
+        out = ""
+        _max = max(array)
+        if _max:
+            normalized = [x/_max for x in array]
+        else:
+            normalized = array
+        for item in normalized:
+            if math.isnan(item):
+                simplified = "?"
+            else:
+                if item < 0:
+                    simplified = "N" # Negative
+                else:
+                    simplified = str(int(item*5))
+                    if simplified == "0":
+                        simplified = "."
+            out += simplified
+        out += " (max: %.1f)" % _max
+        return out
+    else:
+        if type(array[0]) is int or coerce_to_int:
+            return ''.join([str(int(x)) for x in array])
+        elif type(array[0]) in [float, np.float64]:
+            return '|'.join([str(int(x)) for x in array])
+
+def bool_overlap(arr1, arr2):
+    return sum((arr1/arr1) == (arr2/arr2))
