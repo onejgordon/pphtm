@@ -9,14 +9,15 @@ import numpy as np
 import random
 from encoders import SimpleFullWidthEncoder
 
-END_FILE_PCT = .25
+CROP_FILE = 140
+END_FILE_PCT = .15
 
 # values are either tuple of range (min, max) inclusive, or static value
 # ranges are considered integer ranges if min is an integer, otherwise float
 SWARM_CONFIG = {
-    'PROXIMAL_ACTIVATION_THRESHHOLD': 3,
+    'PROXIMAL_ACTIVATION_THRESHHOLD': 2,
     'DISTAL_ACTIVATION_THRESHOLD': 2,
-    'BOOST_MULTIPLIER': (1.2, 1.4),
+    'BOOST_MULTIPLIER': (1.5, 2.1),
     'DESIRED_LOCAL_ACTIVITY': 2,
     'DO_BOOSTING': 1,
     'DISTAL_SYNAPSE_CHANCE': 0.5,
@@ -34,22 +35,23 @@ class RunResult(object):
         self.percent_correct_end = percent_correct_end
 
     def __str__(self):
-        pretty_good = self.percent_correct_end > 0.5
+        good = self.percent_correct_end > 0.7
         out = "Run Result (%d) %% correct: %.1f, %% correct end: %.1f" % (self.iteration_id, 100.0 * self.percent_correct, 100.0 * self.percent_correct_end)
-        if pretty_good:
+        if good:
             out += " <<< GOOD"
         return out
 
     def print_params(self):
+        res = ""
         for k, v in self.params.items():
             if SWARM_CONFIG[k] != v:
-                print "%s -> %s" % (k, v)
+                res += "%s -> %s\n" % (k, v)
+        return res
 
 class SwarmRunner(object):
 
     DATA_DIR = "data"
     ALPHA = "ABCDEF"
-    CROP_FILE = 180
     N_INPUTS = 36
     CPR = [9**2] # Cells per region
 
@@ -106,20 +108,24 @@ class SwarmRunner(object):
                 print "Pred: %s, char: %s" % (prediction, char)
                 if prediction and char == prediction:
                     correct_predictions += 1
-                    if (float(self.cursor) / self.CROP_FILE) > (1.0 - END_FILE_PCT):
+                    if (float(self.cursor) / CROP_FILE) > (1.0 - END_FILE_PCT):
                         # Last 25%
                         correct_predictions_end += 1
                 prediction = self.process(char)
-                done = self.cursor >= self.CROP_FILE
-            pct_correct = float(correct_predictions) / self.CROP_FILE
-            pct_correct_end = float(correct_predictions_end) / (END_FILE_PCT * self.CROP_FILE)
+                done = self.cursor >= CROP_FILE
+            pct_correct = float(correct_predictions) / CROP_FILE
+            pct_correct_end = float(correct_predictions_end) / (END_FILE_PCT * CROP_FILE)
             self.results[i] = RunResult(iteration_id=i, params=params, percent_correct=pct_correct, percent_correct_end=pct_correct_end)
             print "Iteration %d done" % (i)
 
         print "Swarm run done!"
-        for iteration_id, runresult in self.results.items():
-            print runresult
-            runresult.print_params()
+        sorted_results = sorted(self.results.items(), key=lambda r : r[1].percent_correct_end)
+        with open("../outputs/last_run.txt", "w") as text_file:
+            for iteration_id, runresult in sorted_results:
+                print runresult
+                print runresult.print_params()
+                text_file.write(str(runresult))
+                text_file.write(runresult.print_params())
 
     def process(self, char):
         # Process one step
@@ -130,7 +136,7 @@ class SwarmRunner(object):
         return prediction
 
 def main():
-    swarm = SwarmRunner(iterations=10)
+    swarm = SwarmRunner(iterations=30)
     swarm.run()
 
 if __name__ == "__main__":
