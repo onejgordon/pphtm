@@ -14,16 +14,15 @@ USE_SIMPLE_ENCODER = True
 
 class FileProcesser(object):
 
-    DATA_DIR = "data"
+    DATA_DIR = "../data"
     ALPHA = "ABCDEF"
     CROP_FILE = 200
     N_INPUTS = 36
-    CPR = [9**2]
     auto_predict = 16
 
     def __init__(self, filename="simple_pattern2.txt", with_classifier=True, delay=50, animate=True):
-        self.b = PPHTMBrain(cells_per_region=self.CPR, min_overlap=1, r1_inputs=self.N_INPUTS)
-        self.b.initialize()
+        self.b = PPHTMBrain(min_overlap=1, r1_inputs=self.N_INPUTS)
+        self.b.initialize(CELLS_PER_REGION=9**2, N_REGIONS=1)
         self.classifier = None
         self.animate = animate
         self.current_batch_target = 0

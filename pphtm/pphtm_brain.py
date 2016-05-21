@@ -8,7 +8,7 @@ from util import printarray
 
 # Settings (global vars, other vars set in brain.__init__)
 
-VERBOSITY = 1
+VERBOSITY = 0
 DEF_MIN_OVERLAP = 2
 CONNECTED_PERM = 0.2  # If the permanence value for a synapse is greater than this value, it is said to be connected.
 DUTY_HISTORY = 100
@@ -25,7 +25,7 @@ MIN_FADE_RATE, MAX_FADE_RATE = (0.5, 0.9)
 
 DISTAL_SEGMENTS = 3
 PROX_SEGMENTS = 2
-TOPDOWN_SEGMENTS = 1
+TOPDOWN_SEGMENTS = 1 # Only relevant if >1 region
 
 SYNAPSE_DECAY = 0.0005
 BOOST_DISTAL = False
@@ -356,7 +356,7 @@ class Region(object):
             c = Cell(region=self, index=i)
             c.initialize()
             self.cells.append(c)
-        print "Initialized %s" % self
+        log("Initialized %s" % self)
 
     def region_above(self):
         if self.index < len(self.brain.regions) - 1:
@@ -691,12 +691,10 @@ class PPHTMBrain(object):
     Predictive Processing implementation of HTM.
     '''
 
-
-    def __init__(self, cells_per_region=None, min_overlap=DEF_MIN_OVERLAP, r1_inputs=1):
+    def __init__(self, min_overlap=DEF_MIN_OVERLAP, r1_inputs=1):
         self.regions = []
         self.t = 0
         self.active_behaviors = []
-        self.cells_per_region = cells_per_region
         self.inputs = None
 
         # Brain config
@@ -712,11 +710,13 @@ class PPHTMBrain(object):
         self.TOPDOWN_SYNAPSE_CHANCE = 0.4
         self.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.4
         self.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.1
+        self.CELLS_PER_REGION = 9**2
+        self.N_REGIONS = 1
 
     def __repr__(self):
         return "<PPHTMBrain regions=%d>" % len(self.regions)
 
-    def initialize(self, **params):
+    def initialize(self, n_inputs=None, **params):
         if 'PROXIMAL_ACTIVATION_THRESHHOLD' in params:
             self.PROXIMAL_ACTIVATION_THRESHHOLD = params.get('PROXIMAL_ACTIVATION_THRESHHOLD')
         if 'DISTAL_ACTIVATION_THRESHOLD' in params:
@@ -735,26 +735,34 @@ class PPHTMBrain(object):
             self.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = params.get('MAX_PROXIMAL_INIT_SYNAPSE_CHANCE')
         if 'MIN_PROXIMAL_INIT_SYNAPSE_CHANCE' in params:
             self.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = params.get('MIN_PROXIMAL_INIT_SYNAPSE_CHANCE')
+        if 'CELLS_PER_REGION' in params:
+            self.CELLS_PER_REGION = params.get('CELLS_PER_REGION')
+        if 'N_REGIONS' in params:
+            self.N_REGIONS = params.get('N_REGIONS')
+
+        if n_inputs is not None:
+            self.n_inputs = n_inputs
 
         n_inputs = self.n_inputs
 
         # Initialize and create regions and cells
         self.regions = []
-        for i, cpr in enumerate(self.cells_per_region):
-            top_region = i == len(self.cells_per_region) - 1
+        for i in range(self.N_REGIONS):
+            top_region = i == self.N_REGIONS - 1
+            cpr = self.CELLS_PER_REGION
             r = Region(self, i, n_inputs=n_inputs, n_cells=cpr, n_cells_above=cpr if not top_region else 0)
             r.initialize()
             n_inputs = cpr  # Next region will have 1 input for each output cell
             self.regions.append(r)
         self.t = 0
-        print "Initialized %s" % self
+        log("Initialized %s" % self)
 
     def process(self, readings, learning=False):
         '''
         Step through all regions inputting output of each into next
         Returns output of last region
         '''
-        print "~~~~~~~~~~~~~~~~~ Processing inputs at T%d" % self.t
+        log("~~~~~~~~~~~~~~~~~ Processing inputs at T%d" % self.t, level=1)
         self.inputs = readings
         _in = self.inputs
         for i, r in enumerate(self.regions):

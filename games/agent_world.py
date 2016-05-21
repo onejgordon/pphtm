@@ -5,10 +5,11 @@
 __author__      = "Jeremy Gordon"
 __copyright__   = "Copyright 2015"
 
+import sys
+from os import path
+sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 import numpy as np
 import math
-from htm_brain import HTMBrain
-from brain import Brain
 from Tkinter import *
 from constants import *
 
@@ -48,7 +49,7 @@ class BaseGame(object):
         self.running = False
         self.agent = None
         self.world = None
-        
+
         # 2D Graphics
         self.window = None
         self.canvas = None
@@ -198,5 +199,5 @@ class Agent(Drawable2D):
 
     def gotReward(self, reward):
         self.reward += reward
-        print "Rewarded! %s, Current -> %s" % (reward, self.reward)        
+        print "Rewarded! %s, Current -> %s" % (reward, self.reward)
 

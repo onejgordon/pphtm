@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import numpy as np
-from intell import Agent, Behavior, BaseGame, Sensor, Base2DWorld, Drawable2D
+from agent_world import Agent, Behavior, BaseGame, Sensor, Base2DWorld, Drawable2D
 import util
 from constants import *
 
@@ -27,7 +27,7 @@ class SimpleHeatSource(Drawable2D):
     def setupGraphics(self, canvas):
         core_corners = util.toScreen(util.circleCorners(self.position, self.radius), CELL_RESOLUTION)
         outer_corners = util.toScreen(util.circleCorners(self.position, self.maxDistance()), CELL_RESOLUTION)
-        canvas.create_oval(*outer_corners, fill="red")        
+        canvas.create_oval(*outer_corners, fill="red")
         canvas.create_oval(*core_corners, fill="black")
 
     def maxDistance(self):
@@ -47,7 +47,7 @@ class SimpleHeatSource(Drawable2D):
 
 class SimpleHeatWorld(Base2DWorld):
     '''
-    Basic world in 2 or 3 dimensions 
+    Basic world in 2 or 3 dimensions
     Heat sources can be added with a single position, and pos or neg temperature
     The heat at any location in the world is defined by distance from each heat source
     '''
@@ -81,7 +81,7 @@ class HeatAntennaSensor(Sensor):
     '''
 
     def __init__(self, nickname, world, offset, utility=0):
-        super(HeatAntennaSensor, self).__init__(nickname, world, utility=utility)      
+        super(HeatAntennaSensor, self).__init__(nickname, world, utility=utility)
         self.offset = offset
 
     def observe(self, state):
@@ -133,7 +133,7 @@ class DriveBehavior(Behavior):
 class SimpleHeatAgent(Agent):
     '''
     Agent with 6 directional heat antennas and 3 behaviors
-    
+
     '''
     DRAW_SIZE = 1
     DRAW_ARC = 80
@@ -142,14 +142,14 @@ class SimpleHeatAgent(Agent):
         sensors = [
             HeatAntennaSensor('nw', world, [-1,1]),
             HeatAntennaSensor('nnw', world, [-0.5,1]),
-            HeatAntennaSensor('n', world, [0,1]),                     
-            HeatAntennaSensor('nne', world, [0.5,1]),                     
-            HeatAntennaSensor('ne', world, [1,1]),                                                
+            HeatAntennaSensor('n', world, [0,1]),
+            HeatAntennaSensor('nne', world, [0.5,1]),
+            HeatAntennaSensor('ne', world, [1,1]),
             HeatAntennaSensor('here', world, [0,0], utility=1)  # Redeemed reward
         ]
         behaviors = [
             RotateBehavior('turn right', world, cw=True),
-            RotateBehavior('turn left', world, cw=False),            
+            RotateBehavior('turn left', world, cw=False),
             DriveBehavior('drive', world)
         ]
         state = AgentState(world)
