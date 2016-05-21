@@ -14,13 +14,13 @@ WORDS = [
 	"BAGGD",
 	"GAGGF",
 	"GAFFED",
-	"BAD"
+	"CAD"
 ]
 
 CHANCE_NOISE = 0.01
 CHANCE_CORRUPT_WORD = 0.01
 NOISE_LEN_RANGE = (1,5)
-FILE_LEN = 500
+FILE_LEN = 1000
 
 def random_char():
 	index = random.randint(0, len(CHARS)-1)

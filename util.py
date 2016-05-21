@@ -24,7 +24,7 @@ def sdatetime(dt):
 def average(li):
     if len(li):
         li = [x for x in li if x is not None]
-        return sum(li) / len(li)
+        return float(sum(li)) / len(li)
     else:
         return 0
 

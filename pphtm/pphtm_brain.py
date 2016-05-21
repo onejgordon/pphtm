@@ -16,18 +16,8 @@ INHIBITION_RADIUS_DISCOUNT = 0.8
 INIT_PERMANENCE = 0.2  # New learned synapses
 INIT_PERMANENCE_JITTER = 0.05  # Max offset from CONNECTED_PERM when initializing synapses
 SYNAPSE_ACTIVATION_LEARN_THRESHHOLD = 1.0
-INIT_PERMANENCE_LEARN_INC_CHANGE = 0.03
-INIT_PERMANENCE_LEARN_DEC_CHANGE = 0.003
-CHANCE_OF_INHIBITORY = 0.2
-DISTAL_BIAS_EFFECT, OVERLAP_EFFECT = (0.6, 0.6)
 T_START_BOOSTING = 0
-MIN_FADE_RATE, MAX_FADE_RATE = (0.5, 0.9)
 
-DISTAL_SEGMENTS = 3
-PROX_SEGMENTS = 2
-TOPDOWN_SEGMENTS = 1 # Only relevant if >1 region
-
-SYNAPSE_DECAY = 0.0005
 BOOST_DISTAL = False
 
 def log(message, level=1):
@@ -150,7 +140,8 @@ class Segment(object):
     def remove_synapse(self, index):
         pass
 
-    def decay_permanences(self, factor=SYNAPSE_DECAY):
+    def decay_permanences(self):
+        factor = self.region.brain.SYNAPSE_DECAY
         self.syn_permanences = [max(p - factor, 0.0) for p in self.syn_permanences]
 
     def distance_from(self, coords_xy, index=0):
@@ -217,19 +208,19 @@ class Cell(object):
     Has multiple dendrite segments connected to inputs
     '''
 
-    def __init__(self, region, index, n_proximal_segments=PROX_SEGMENTS, n_distal_segments=DISTAL_SEGMENTS, n_topdown_segments=TOPDOWN_SEGMENTS):
+    def __init__(self, region, index):
         self.index = index
         self.region = region
-        self.n_proximal_segments = n_proximal_segments
-        self.n_distal_segments = n_distal_segments
-        self.n_topdown_segments = n_topdown_segments if not self.region.is_top() else 0
+        self.n_proximal_segments = self.region.brain.PROX_SEGMENTS
+        self.n_distal_segments = self.region.brain.DISTAL_SEGMENTS
+        self.n_topdown_segments = self.region.brain.TOPDOWN_SEGMENTS if not self.region.is_top() else 0
         self.distal_segments = []
         self.proximal_segments = []
         self.topdown_segments = []
         self.activation = 0.0 # [0.0, 1.0]
         self.coords = util.coords_from_index(index, self.region._cell_side_len())
-        self.fade_rate = random.uniform(MIN_FADE_RATE, MAX_FADE_RATE)
-        self.excitatory = random.random() > CHANCE_OF_INHIBITORY
+        self.fade_rate = self.region.brain.FADE_RATE
+        self.excitatory = random.random() > self.region.brain.CHANCE_OF_INHIBITORY
 
         # History
         self.recent_active_duty = []  # After inhibition, list of bool
@@ -312,13 +303,13 @@ class Region(object):
     Made up of many columns
     '''
 
-    def __init__(self, brain, index, permanence_inc=INIT_PERMANENCE_LEARN_INC_CHANGE, permanence_dec=INIT_PERMANENCE_LEARN_DEC_CHANGE, n_cells=10, n_inputs=20, n_cells_above=0):
+    def __init__(self, brain, index, n_cells=10, n_inputs=20, n_cells_above=0):
         self.index = index
         self.brain = brain
 
         # Region constants (spatial)
-        self.permanence_inc = permanence_inc
-        self.permanence_dec = permanence_dec
+        self.permanence_inc = self.brain.INIT_PERMANENCE_LEARN_INC_CHANGE
+        self.permanence_dec = self.brain.INIT_PERMANENCE_LEARN_DEC_CHANGE
         self.inhibition_radius = 0 # Average connected receptive field size of the columns
 
         # Hierarchichal setup
@@ -484,7 +475,7 @@ class Region(object):
             - Bias (distal)
         Sum the two (weighted) and choose winners (active outputs)
         '''
-        self.pre_activation = OVERLAP_EFFECT * self.overlap * (1 + DISTAL_BIAS_EFFECT * self.bias)
+        self.pre_activation = self.brain.OVERLAP_EFFECT * self.overlap * (1 + self.brain.DISTAL_BIAS_EFFECT * self.bias)
         active = np.zeros(len(self.cells))
         for c in self.cells:
             pa = self.pre_activation[c.index]
@@ -712,6 +703,16 @@ class PPHTMBrain(object):
         self.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.1
         self.CELLS_PER_REGION = 9**2
         self.N_REGIONS = 1
+        self.DISTAL_BIAS_EFFECT = 0.6
+        self.OVERLAP_EFFECT = 0.6
+        self.FADE_RATE = 0.7
+        self.DISTAL_SEGMENTS = 3
+        self.PROX_SEGMENTS = 2
+        self.TOPDOWN_SEGMENTS = 1 # Only relevant if >1 region
+        self.SYNAPSE_DECAY = 0.0005
+        self.INIT_PERMANENCE_LEARN_INC_CHANGE = 0.03
+        self.INIT_PERMANENCE_LEARN_DEC_CHANGE = 0.003
+        self.CHANCE_OF_INHIBITORY = 0.2
 
     def __repr__(self):
         return "<PPHTMBrain regions=%d>" % len(self.regions)
@@ -739,6 +740,26 @@ class PPHTMBrain(object):
             self.CELLS_PER_REGION = params.get('CELLS_PER_REGION')
         if 'N_REGIONS' in params:
             self.N_REGIONS = params.get('N_REGIONS')
+        if 'DISTAL_BIAS_EFFECT' in params:
+    	   self.DISTAL_BIAS_EFFECT = params.get('DISTAL_BIAS_EFFECT')
+        if 'OVERLAP_EFFECT' in params:
+    	   self.OVERLAP_EFFECT = params.get('OVERLAP_EFFECT')
+        if 'FADE_RATE' in params:
+    	   self.FADE_RATE = params.get('FADE_RATE')
+        if 'DISTAL_SEGMENTS' in params:
+    	   self.DISTAL_SEGMENTS = params.get('DISTAL_SEGMENTS')
+        if 'PROX_SEGMENTS' in params:
+    	   self.PROX_SEGMENTS = params.get('PROX_SEGMENTS')
+        if 'TOPDOWN_SEGMENTS' in params:
+            self.TOPDOWN_SEGMENTS = params.get('TOPDOWN_SEGMENTS')
+        if 'SYNAPSE_DECAY' in params:
+        	self.SYNAPSE_DECAY = params.get('SYNAPSE_DECAY')
+        if 'INIT_PERMANENCE_LEARN_INC_CHANGE' in params:
+        	self.INIT_PERMANENCE_LEARN_INC_CHANGE = params.get('INIT_PERMANENCE_LEARN_INC_CHANGE')
+        if 'INIT_PERMANENCE_LEARN_DEC_CHANGE' in params:
+        	self.INIT_PERMANENCE_LEARN_DEC_CHANGE = params.get('INIT_PERMANENCE_LEARN_DEC_CHANGE')
+        if 'CHANCE_OF_INHIBITORY' in params:
+            self.CHANCE_OF_INHIBITORY = params.get('CHANCE_OF_INHIBITORY')
 
         if n_inputs is not None:
             self.n_inputs = n_inputs

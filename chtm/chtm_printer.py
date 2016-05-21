@@ -229,7 +229,7 @@ class CHTMPrinter(object):
         self.predictor_window, self.predictor_canvas = None, None
 
         self.focus_cell_index = None
-        self.rolling_bias_match = []
+        self.rolling_prediction_correct = []
         self.menubar = None
 
         # State
@@ -237,6 +237,7 @@ class CHTMPrinter(object):
         self.last_raw_input = None
         self.raw_input = None
         self.prediction = None
+        self.prediction_correct = False
 
         # Canvas items
         self.labeled_values = {} # string key -> canvas item
@@ -291,7 +292,7 @@ class CHTMPrinter(object):
         self._setup_labeled_value("last_input", label="Last Input", x=input_rc.x_middle(), y=main_height - 220, color="#CCC")
         self._setup_labeled_value("raw_input", label="Raw Input", x=input_rc.x_middle(), y=main_height - 180, color="#000")
         self._setup_labeled_value("prediction", label="Prediction", x=input_rc.x_middle(), y=main_height - 140, color="#ccc12a")
-        self._setup_labeled_value("rolling_match", label="Rolling Match", x=input_rc.x_middle(), y=main_height - 100, color="#000")
+        self._setup_labeled_value("rolling_prediction_correct", label="Prediction Matches", x=input_rc.x_middle(), y=main_height - 100, color="#000")
         self._setup_labeled_value("time", label="Time Step", x=input_rc.x_middle(), y=main_height - 60, color="#000")
 
         # Cell detail window & canvas
@@ -357,10 +358,13 @@ class CHTMPrinter(object):
         # Setup value
         self.labeled_values[key] = self.canvas.create_text(x, y, fill=color, font=("Purisa", VALUE_SIZE), anchor="s")
 
-    def _update_labeled_value(self, key, value="N/A"):
+    def _update_labeled_value(self, key, value="N/A", color=None):
         lv = self.labeled_values.get(key)
         if lv:
-            self.canvas.itemconfig(lv, text=value)
+            kwargs = {}
+            if color:
+                kwargs['fill'] = color
+            self.canvas.itemconfig(lv, text=value, **kwargs)
 
     def predictor_draw_fn(self, raw_input, index):
         region = self.predictor.region
@@ -404,6 +408,8 @@ class CHTMPrinter(object):
         if self.raw_input:
             self.last_raw_input = self.raw_input
         self.raw_input = ri
+        self.prediction_correct = self.prediction and self.prediction == self.raw_input
+        util.rolling_list(self.rolling_prediction_correct, length=10, new_value=1 if self.prediction_correct else 0)
 
     def set_prediction(self, prediction):
         self.prediction = prediction
@@ -413,22 +419,15 @@ class CHTMPrinter(object):
             cg.render(self.focus_cell_index)
 
         r = self.brain.regions[0]
-        bias_count = float(sum(r.last_bias > 0))
-        if bias_count > 0:
-            bias_match = sum(np.logical_and(r.last_bias > 0, r.overlap > 0))
-            ratio = bias_match / bias_count
-        else:
-            ratio = 0
-        if ratio:
-            util.rolling_list(self.rolling_bias_match, length=5, new_value=ratio)
-        rolling_average = util.average(self.rolling_bias_match)
-        self._update_labeled_value('rolling_match', value="%.2f" % rolling_average)
         if self.last_raw_input:
             self._update_labeled_value('last_input', value=self.last_raw_input)
         if self.raw_input:
-            self._update_labeled_value('raw_input', value=self.raw_input)
+            color = '#14FF49' if self.prediction_correct else '#000000'
+            self._update_labeled_value('raw_input', value=self.raw_input, color=color)
         if self.prediction:
             self._update_labeled_value('prediction', value=self.prediction)
+        rolling_average = util.average(self.rolling_prediction_correct)
+        self._update_labeled_value('rolling_prediction_correct', value="%.2f" % rolling_average)
         self._update_labeled_value('time', value=str(self.brain.t))
 
     def focus_cell(self, region, index):

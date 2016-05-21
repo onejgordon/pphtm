@@ -3,19 +3,27 @@ import sys
 from os import path
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 from pphtm.pphtm_brain import PPHTMBrain
-from chtm.chtm_printer import CHTMPrinter
 from pphtm.pphtm_predictor import PPHTMPredictor
 from datetime import datetime
 import numpy as np
 import util
 import random
 from encoders import SimpleFullWidthEncoder
+import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.pyplot as plt
+# import colormaps as cmaps
+from matplotlib import cm
 
+VERBOSITY = 1
+GOOD_CUTOFF_PCT = 0.6
 FILENAME = "longer_char_sequences1.txt"
 ALPHA = "ABCDEFG" # All data in file (auto-produce?)
-ITERATIONS = 10
-CROP_FILE = 300
-END_FILE_PCT = .15
+# FILENAME = "simple_pattern2.txt"
+# ALPHA = "ABCDEF"
+ITERATIONS = 20
+CROP_FILE = 200
+END_FILE_PCT = .10
 
 # values are either:
 # - tuple of range (min, max) inclusive,
@@ -23,18 +31,30 @@ END_FILE_PCT = .15
 # - static value
 # ranges are considered integer ranges if min is an integer, otherwise continuous
 SWARM_CONFIG = {
-    'PROXIMAL_ACTIVATION_THRESHHOLD': (2,3),
-    'DISTAL_ACTIVATION_THRESHOLD': (2, 3),
-    'BOOST_MULTIPLIER': (1.5, 2.1),
+    'PROXIMAL_ACTIVATION_THRESHHOLD': 3,
+    'DISTAL_ACTIVATION_THRESHOLD': 2,
+    'BOOST_MULTIPLIER': (1.2, 2.0),
     'DESIRED_LOCAL_ACTIVITY': 2,
     'DO_BOOSTING': 1,
     'DISTAL_SYNAPSE_CHANCE': 0.5,
     'TOPDOWN_SYNAPSE_CHANCE': 0.4,
     'MAX_PROXIMAL_INIT_SYNAPSE_CHANCE': 0.4,
     'MIN_PROXIMAL_INIT_SYNAPSE_CHANCE': 0.1,
-    'CELLS_PER_REGION': [7**2, 8**2, 9**2],
-    'N_REGIONS': [1,2]
+    'CELLS_PER_REGION': [8**2, 10**2, 12**2],
+    'N_REGIONS': 1,
+    'DISTAL_BIAS_EFFECT': 0.6,
+    'OVERLAP_EFFECT': 0.6,
+    'FADE_RATE': 0.7,
+    'DISTAL_SEGMENTS': 3,
+    'PROX_SEGMENTS': 2,
+    'TOPDOWN_SEGMENTS': 1, # Only relevant if >1 region
+    'SYNAPSE_DECAY': (0.0002, 0.0009),
+    'INIT_PERMANENCE_LEARN_INC_CHANGE': 0.03,
+    'INIT_PERMANENCE_LEARN_DEC_CHANGE': 0.003,
+    'CHANCE_OF_INHIBITORY': 0.2
 }
+
+
 
 class RunResult(object):
 
@@ -51,7 +71,7 @@ class RunResult(object):
         return out
 
     def good(self):
-        return self.percent_correct_end > 0.6 # TODO: customize based on ave word len
+        return self.percent_correct_end > GOOD_CUTOFF_PCT # TODO: customize based on ave word len
 
     def print_params(self, unique_only=True):
         res = ""
@@ -86,6 +106,15 @@ class SwarmRunner(object):
                 # static
                 res += "%s -> %s\n" % (k, v)
         return res
+
+    def _variable_params(self):
+        params = []
+        for k, v in SWARM_CONFIG.items():
+            if type(v) in [tuple, list]:
+                # variable
+                params.append(k)
+        params = sorted(params) # Alpha sort for consistency
+        return params
 
     def _encode_letter(self, c):
         i = ord(c.upper()) - 65 # A == 0
@@ -132,7 +161,7 @@ class SwarmRunner(object):
         self._read_data()
         self.start_time = datetime.now()
         for i in range(self.iterations):
-            print "Running iteration %d" % (i)
+            print "Running iteration %d/%d" % (i, self.iterations)
             params = self._choose_params()
             # Initialize brain with selected params
             self.b.initialize(**params)
@@ -146,20 +175,23 @@ class SwarmRunner(object):
                 self.cursor += 1
                 char = self.data[self.cursor].upper()
                 # print "Pred: %s, char: %s" % (prediction, char)
-                if prediction and char == prediction:
+                correct_prediction = prediction and char == prediction
+                if correct_prediction:
                     correct_predictions += 1
                     if (float(self.cursor) / CROP_FILE) > (1.0 - END_FILE_PCT):
-                        # Last 25%
                         correct_predictions_end += 1
                 prediction = self.process(char)
+                out_char = "P" if correct_prediction else "."
+                log(out_char, level=2)
                 done = self.cursor >= CROP_FILE
             pct_correct = float(correct_predictions) / CROP_FILE
             pct_correct_end = float(correct_predictions_end) / (END_FILE_PCT * CROP_FILE)
-            self.results[i] = RunResult(iteration_id=i, params=params, percent_correct=pct_correct, percent_correct_end=pct_correct_end)
-            print "Iteration %d done" % (i)
+            rr = RunResult(iteration_id=i, params=params, percent_correct=pct_correct, percent_correct_end=pct_correct_end)
+            self.results[i] = rr
+            log("Iteration %d/%d done - %s" % (i, self.iterations, rr))
 
         self.end_time = datetime.now()
-        print "Swarm run done!"
+        log("Swarm run done!")
         sorted_results = sorted(self.results.items(), key=lambda r : r[1].percent_correct_end)
         fname = "Run at " + util.sdatetime(self.start_time)
         n_good = 0
@@ -172,7 +204,8 @@ class SwarmRunner(object):
                 text_file.write(runresult.print_params()+"\n")
                 if runresult.good():
                     n_good += 1
-            text_file.write(">>> %.0f <<< Percent of runs good" % (float(n_good)/len(self.results.keys()) ))
+            text_file.write(">>> %.1f <<< Percent of runs good" % (float(n_good)*100./self.iterations))
+        self.plot_results()
 
     def process(self, char):
         # Process one step
@@ -181,6 +214,42 @@ class SwarmRunner(object):
         self.classifier.read(char)
         prediction = self.classifier.predict()
         return prediction
+
+    def plot_results(self):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        plot_params = self._variable_params()[:3] # First 3 variable params
+        n = 100
+        xs = []
+        ys = []
+        zs = []
+        colors = []
+        title = 'Summary of swarm runs'
+        for i, pp in enumerate(plot_params):
+            if i == 0:
+                ax.set_xlabel(pp)
+            elif i == 1:
+                ax.set_ylabel(pp)
+            elif i == 2:
+                title += " (color = %s)" % pp
+        for index, rr in self.results.items():
+            for i, pp in enumerate(plot_params):
+                if i == 0:
+                    xs.append(rr.params.get(pp))
+                elif i == 1:
+                    ys.append(rr.params.get(pp))
+                elif i == 2:
+                    colors.append(rr.params.get(pp))
+            zs.append(rr.percent_correct_end) # Z always percent correct (outcome rating)
+        ax.scatter(xs, ys, zs, c=colors, cmap=cm.jet)
+        ax.set_zlabel('Percent Correct at End (%)')
+        plt.title(title)
+        plt.show()
+
+def log(message, level=1):
+    if VERBOSITY >= level:
+        print message
+
 
 def main():
     swarm = SwarmRunner(FILENAME, iterations=ITERATIONS)

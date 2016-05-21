@@ -2,18 +2,13 @@
 
 ## Implementation TODO
 
+* Show run summary at end of swarm with 3d chart of params and outcome to help learning
+
+## Algorithm TODO
+
 * Do we need more distal activation? Overlap instead of subset?
-* Swarming tests
-* Show snapshots of each input to assess quality of prediction
-* Show letters in bias grid showing next bias, and which input it usually
-* predicts.
 * Should we try boosting distal synapses if active duty cycle low?
-
 * We need to unlearn synapses that lead to bias noise.
-* Bias should eventually be a subset of overlap
-
-* Confirm in the bias condition, we are using current bias to predict
-* next time step.
 
 ## PP TODO
 
@@ -44,10 +39,8 @@
 * A->B, since it's less frequent, is unable to learn this transition (we
 * unlearn it every time E->B happens). Should we only learn on active segments?
 * If so, how do we ensure we ever have activity? Should we learn on most
-* active segment? Doesn't work because we then only learn on one seg each cell
-
+ active segment? Doesn't work because we then only learn on one seg each cell
 * Should we unlearn distabl predictions that never activate? Causing noise
 * in bias layer that doesn't go away.
-
-* Looks like we are learning too much on one segment (active),
+* Looks like we are learning too much on one segment (active)
 * straddline multiple patterns.
