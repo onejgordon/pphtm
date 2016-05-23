@@ -11,10 +11,8 @@ CHARS = "ABCDEFG"
 
 WORDS = [
 	"ABCDEFG",
-	"BAGGD",
-	"GAGGF",
-	"GAFFED",
-	"CAD"
+	"BACGD",
+	"GACGF"
 ]
 
 CHANCE_NOISE = 0.01

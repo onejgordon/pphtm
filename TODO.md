@@ -2,10 +2,16 @@
 
 ## Implementation TODO
 
-* Show run summary at end of swarm with 3d chart of params and outcome to help learning
+* When proximity weighting is off, we need to use a different calc. for inhibition radius (since ave receptive field size is max)
+* Linear regression on swarm runs to show stat. sig. of any relationships
+* Top down learning
+* How dow e form invariant structures?
+* Drastic fluctuation in number of cells active (kth_score logic issue?)
 
 ## Algorithm TODO
 
+* Does formation of invariant structures require lower-level slowness?
+	- E.g. ABC retains enough of AB to fire higher level SDR representing ABC
 * Do we need more distal activation? Overlap instead of subset?
 * Should we try boosting distal synapses if active duty cycle low?
 * We need to unlearn synapses that lead to bias noise.
@@ -13,6 +19,7 @@
 ## PP TODO
 
 * How is precision weighting modeled?
+* How dow e form invariant structures?
 * How to code error signal? Predictions? (error is only output of a region, not neurono-based?)
 * What is difference between prediction and activation?
 	- HTM says this is NMDA spike from distal connections -> predicted cell state

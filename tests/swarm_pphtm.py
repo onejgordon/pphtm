@@ -12,7 +12,6 @@ from encoders import SimpleFullWidthEncoder
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
-# import colormaps as cmaps
 from matplotlib import cm
 
 VERBOSITY = 1
@@ -21,9 +20,10 @@ FILENAME = "longer_char_sequences1.txt"
 ALPHA = "ABCDEFG" # All data in file (auto-produce?)
 # FILENAME = "simple_pattern2.txt"
 # ALPHA = "ABCDEF"
-ITERATIONS = 20
-CROP_FILE = 200
-END_FILE_PCT = .10
+ITERATIONS = 30
+RERUN_PARAMS = 1 # No. of runs for each randomized param set
+CROP_FILE = 150
+END_FILE_PCT = .15
 
 # values are either:
 # - tuple of range (min, max) inclusive,
@@ -33,25 +33,30 @@ END_FILE_PCT = .10
 SWARM_CONFIG = {
     'PROXIMAL_ACTIVATION_THRESHHOLD': 3,
     'DISTAL_ACTIVATION_THRESHOLD': 2,
-    'BOOST_MULTIPLIER': (1.2, 2.0),
+    'BOOST_MULTIPLIER': 2.58, #(2.0, 3.0),
     'DESIRED_LOCAL_ACTIVITY': 2,
-    'DO_BOOSTING': 1,
     'DISTAL_SYNAPSE_CHANCE': 0.5,
-    'TOPDOWN_SYNAPSE_CHANCE': 0.4,
-    'MAX_PROXIMAL_INIT_SYNAPSE_CHANCE': 0.4,
+    'TOPDOWN_SYNAPSE_CHANCE': 0.5,
+    'MAX_PROXIMAL_INIT_SYNAPSE_CHANCE': 0.6,
     'MIN_PROXIMAL_INIT_SYNAPSE_CHANCE': 0.1,
-    'CELLS_PER_REGION': [8**2, 10**2, 12**2],
+    'CELLS_PER_REGION': 9**2, #[6**2, 8**2, 10**2],
     'N_REGIONS': 1,
-    'DISTAL_BIAS_EFFECT': 0.6,
-    'OVERLAP_EFFECT': 0.6,
+    'BIAS_WEIGHT': 1.0,
+    'OVERLAP_WEIGHT': 0.6,
     'FADE_RATE': 0.7,
-    'DISTAL_SEGMENTS': 3,
+    'DISTAL_SEGMENTS': 2,
     'PROX_SEGMENTS': 2,
-    'TOPDOWN_SEGMENTS': 1, # Only relevant if >1 region
-    'SYNAPSE_DECAY': (0.0002, 0.0009),
+    'TOPDOWN_SEGMENTS': 2, # Only relevant if >1 region
+    'SYNAPSE_DECAY': 0.0008,
     'INIT_PERMANENCE_LEARN_INC_CHANGE': 0.03,
     'INIT_PERMANENCE_LEARN_DEC_CHANGE': 0.003,
-    'CHANCE_OF_INHIBITORY': 0.2
+    'CHANCE_OF_INHIBITORY': 0.2,
+    'SYNAPSE_ACTIVATION_LEARN_THRESHHOLD': 1.0,
+    'DISTAL_BOOST_MULT': 0.02,
+    'INHIBITION_RADIUS_DISCOUNT': 0.8,
+    # Booleans
+    'DO_BOOSTING': 1,
+    'PROXIMITY_WEIGHTING': 0
 }
 
 
@@ -160,11 +165,18 @@ class SwarmRunner(object):
     def run(self):
         self._read_data()
         self.start_time = datetime.now()
+        param_run_count = 1
         for i in range(self.iterations):
             print "Running iteration %d/%d" % (i, self.iterations)
-            params = self._choose_params()
+            if self.params and param_run_count < RERUN_PARAMS:
+                print "Param run %d" % param_run_count
+                param_run_count += 1
+            else:
+                param_run_count = 1
+                self._choose_params()
+
             # Initialize brain with selected params
-            self.b.initialize(**params)
+            self.b.initialize(**self.params)
             done = False
             prediction = None
             correct_predictions = 0
@@ -186,9 +198,10 @@ class SwarmRunner(object):
                 done = self.cursor >= CROP_FILE
             pct_correct = float(correct_predictions) / CROP_FILE
             pct_correct_end = float(correct_predictions_end) / (END_FILE_PCT * CROP_FILE)
-            rr = RunResult(iteration_id=i, params=params, percent_correct=pct_correct, percent_correct_end=pct_correct_end)
+            rr = RunResult(iteration_id=i, params=self.params, percent_correct=pct_correct, percent_correct_end=pct_correct_end)
             self.results[i] = rr
             log("Iteration %d/%d done - %s" % (i, self.iterations, rr))
+            log(rr.print_params())
 
         self.end_time = datetime.now()
         log("Swarm run done!")
@@ -241,10 +254,16 @@ class SwarmRunner(object):
                 elif i == 2:
                     colors.append(rr.params.get(pp))
             zs.append(rr.percent_correct_end) # Z always percent correct (outcome rating)
-        ax.scatter(xs, ys, zs, c=colors, cmap=cm.jet)
-        ax.set_zlabel('Percent Correct at End (%)')
-        plt.title(title)
-        plt.show()
+        if xs and ys and zs:
+            if colors:
+                ax.scatter(xs, ys, zs, c=colors, cmap=cm.coolwarm)
+            else:
+                ax.scatter(xs, ys, zs)
+            ax.set_zlabel('Percent Correct at End (%)')
+            plt.title(title)
+            plt.show()
+        else:
+            print "Can't plot, not enough dimensions"
 
 def log(message, level=1):
     if VERBOSITY >= level:

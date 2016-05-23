@@ -11,19 +11,20 @@ from nupic.encoders.scalar import ScalarEncoder
 from encoders import SimpleFullWidthEncoder
 
 USE_SIMPLE_ENCODER = True
-# FILENAME = "longer_char_sequences1.txt"
-FILENAME = "simple_pattern2.txt"
+FILENAME = "longer_char_sequences1.txt"
+SHOW_RUN_SUMMARY = True
+# FILENAME = "simple_pattern2.txt"
 
 class FileProcesser(object):
 
     DATA_DIR = "../data"
-    ALPHA = "ABCDEF"
+    ALPHA = "ABCDEFG"
     CROP_FILE = 300
-    N_INPUTS = 6**2
+    N_INPUTS = 7**2
 
     def __init__(self, filename=FILENAME, with_classifier=True, delay=50, animate=True):
         self.b = PPHTMBrain(min_overlap=1, r1_inputs=self.N_INPUTS)
-        self.b.initialize(CELLS_PER_REGION=9**2, N_REGIONS=1)
+        self.b.initialize()
         self.classifier = None
         self.animate = animate
         self.current_batch_target = 0
@@ -75,6 +76,9 @@ class FileProcesser(object):
                     self.printer.set_prediction(prediction)
                 if self.animate:
                     self.printer.render()
+                batch_finished = self.current_batch_counter == self.current_batch_target
+                if batch_finished and SHOW_RUN_SUMMARY and self.current_batch_target != 1:
+                    self.printer.show_run_summary()
             else:
                 # Get user input for next batch
                 self.current_batch_counter = 0

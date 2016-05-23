@@ -5,6 +5,7 @@ import math
 import util
 from functools import partial
 import numpy as np
+import matplotlib.pyplot as plt
 
 REGION_BUFFER = 20
 CELL_PX = 10
@@ -14,6 +15,7 @@ INDICATOR_DIAMETER = CELL_PX / 2
 LABEL_GAP = 30
 LABEL_SIZE = 10
 VALUE_SIZE = 25
+ROLLING_PREDICTION_COUNT = 20
 
 ################
 # TODO
@@ -239,6 +241,10 @@ class CHTMPrinter(object):
         self.prediction = None
         self.prediction_correct = False
 
+        # History
+        self.prediction_correct_history = []
+        self.rolling_match_history = []
+
         # Canvas items
         self.labeled_values = {} # string key -> canvas item
         self.main_grids = []
@@ -409,7 +415,7 @@ class CHTMPrinter(object):
             self.last_raw_input = self.raw_input
         self.raw_input = ri
         self.prediction_correct = self.prediction and self.prediction == self.raw_input
-        util.rolling_list(self.rolling_prediction_correct, length=10, new_value=1 if self.prediction_correct else 0)
+        util.rolling_list(self.rolling_prediction_correct, length=ROLLING_PREDICTION_COUNT, new_value=1 if self.prediction_correct else 0)
 
     def set_prediction(self, prediction):
         self.prediction = prediction
@@ -429,6 +435,8 @@ class CHTMPrinter(object):
         rolling_average = util.average(self.rolling_prediction_correct)
         self._update_labeled_value('rolling_prediction_correct', value="%.2f" % rolling_average)
         self._update_labeled_value('time', value=str(self.brain.t))
+        self.rolling_match_history.append(rolling_average)
+        self.prediction_correct_history.append(self.prediction_correct)
 
     def focus_cell(self, region, index):
         if index < len(region.cells):
@@ -452,6 +460,23 @@ class CHTMPrinter(object):
             perm, contr, last_change = seg.synapse_state(index)
             print "Synapse focus_cell=%s source_index=%s permanence=%s contribution=%s last_change=%s" % (self.focus_cell_index, index, perm, contr, last_change)
 
+    def show_run_summary(self):
+        bar_vals = self.rolling_match_history
+        bar_colors = self.prediction_correct_history
+
+        ind = np.arange(len(bar_vals))  # the x locations for the groups
+        width = 1.0       # the width of the bars
+
+        fig, ax = plt.subplots()
+        rects1 = ax.bar(ind, bar_vals, width, color=['g' if match else 'r' for match in bar_colors])
+
+        ax.set_title("Prediction improvement over time")
+        ax.set_ylabel('Rolling Prediction Match (%)')
+        ax.set_xlabel('Time Step')
+        # ax.set_xticks(ind + width)
+        # ax.set_xticklabels(range(len(bar_vals)))
+
+        plt.show(block=False)
 
 class CellGrid(object):
     '''
