@@ -2,6 +2,7 @@
 
 import numpy as np
 import math
+from datetime import datetime
 
 def bearingFromVector(dir_unit_vector):
     dx, dy = dir_unit_vector
@@ -15,10 +16,15 @@ def circleCorners(center, radius):
     br_y = y + radius
     return [tl_x, tl_y, br_x, br_y]
 
+def sdatetime(dt):
+    if dt is None:
+        dt = datetime.now()
+    return datetime.strftime(dt, "%Y-%m-%d %H%M")
+
 def average(li):
     if len(li):
         li = [x for x in li if x is not None]
-        return sum(li) / len(li)
+        return float(sum(li)) / len(li)
     else:
         return 0
 
@@ -122,3 +128,27 @@ def printarray(array, coerce_to_int=True, continuous=False):
 
 def bool_overlap(arr1, arr2):
     return sum((arr1/arr1) == (arr2/arr2))
+
+def secsToDuration(secs, hideZeros=True):
+    labels = ["hour","minute","second"]
+    if secs:
+        mins, secs = divmod(secs, 60)
+        hrs, mins = divmod(mins, 60)
+        s = []
+        for i, p in enumerate([hrs,mins,secs]):
+            p = int(p)
+            if p > 0 or not hideZeros:
+                label = labels[i]
+                if p > 1 or p == 0:
+                    label += 's'
+                s.append("%d %s" % (p,label))
+        if len(s):
+            return ', '.join(s)
+        else:
+            return "0 seconds"
+    return "0 seconds"
+
+def duration(startDate, endDate, hideZeros=False):
+    if startDate and endDate:
+        return secsToDuration((endDate-startDate).total_seconds(), hideZeros=hideZeros)
+    return None

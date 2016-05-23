@@ -11,18 +11,19 @@ from nupic.encoders.scalar import ScalarEncoder
 from encoders import SimpleFullWidthEncoder
 
 USE_SIMPLE_ENCODER = True
+FILENAME = "longer_char_sequences1.txt"
+SHOW_RUN_SUMMARY = True
+# FILENAME = "simple_pattern2.txt"
 
 class FileProcesser(object):
 
-    DATA_DIR = "data"
-    ALPHA = "ABCDEF"
-    CROP_FILE = 200
-    N_INPUTS = 36
-    CPR = [9**2]
-    auto_predict = 16
+    DATA_DIR = "../data"
+    ALPHA = "ABCDEFG"
+    CROP_FILE = 300
+    N_INPUTS = 7**2
 
-    def __init__(self, filename="simple_pattern2.txt", with_classifier=True, delay=50, animate=True):
-        self.b = PPHTMBrain(cells_per_region=self.CPR, min_overlap=1, r1_inputs=self.N_INPUTS)
+    def __init__(self, filename=FILENAME, with_classifier=True, delay=50, animate=True):
+        self.b = PPHTMBrain(min_overlap=1, r1_inputs=self.N_INPUTS)
         self.b.initialize()
         self.classifier = None
         self.animate = animate
@@ -65,6 +66,7 @@ class FileProcesser(object):
                 self.cursor += 1
                 self.current_batch_counter += 1
                 char = self.data[self.cursor].upper()
+
                 inputs = self.encode_letter(char)
                 self.printer.set_raw_input(char)
                 self.b.process(inputs, learning=True)
@@ -74,6 +76,9 @@ class FileProcesser(object):
                     self.printer.set_prediction(prediction)
                 if self.animate:
                     self.printer.render()
+                batch_finished = self.current_batch_counter == self.current_batch_target
+                if batch_finished and SHOW_RUN_SUMMARY and self.current_batch_target != 1:
+                    self.printer.show_run_summary()
             else:
                 # Get user input for next batch
                 self.current_batch_counter = 0
@@ -96,39 +101,20 @@ class FileProcesser(object):
 
     def do_prediction(self):
         if self.classifier:
-            if self.auto_predict:
-                predicted_stream = ""
-                for i in range(self.auto_predict):
-                    # Loop through predicting, and then processing prediction
-                    prediction = self.classifier.predict()
-                    predicted_stream += prediction
-                    inputs = self.encode_letter(prediction)
-                    self.b.process(inputs, learning=False)
-                print "Predicted stream:", predicted_stream
-                done = False
-                while not done:
-                    next = raw_input("Enter next letter (q to exit) >> ")
-                    if next:
-                        done = next.upper() == 'Q'
-                        if done:
-                            break
-                        inputs = self.encode_letter(next)
-                        self.printer.set_raw_input(next)
-                        self.b.process(inputs, learning=False)
-                        prediction = self.classifier.predict()
-                        self.printer.set_prediction(prediction)
-                        if self.animate:
-                            self.printer.render()
-
-            else:
-                while True:
-                    user_char = raw_input("Enter a letter to see prediction at t+1... (! to exit) >> ")
-                    if user_char == "!":
+            done = False
+            while not done:
+                next = raw_input("Enter next letter (q to exit) >> ")
+                if next:
+                    done = next.upper() == 'Q'
+                    if done:
                         break
-                    else:
-                        inputs = self.encode_letter(user_char)
-                        self.b.process(inputs, learning=False)
-                        prediction = self.classifier.predict()
+                    inputs = self.encode_letter(next)
+                    self.printer.set_raw_input(next)
+                    self.b.process(inputs, learning=False)
+                    prediction = self.classifier.predict()
+                    self.printer.set_prediction(prediction)
+                    if self.animate:
+                        self.printer.render()
 
         self.printer.window.destroy()
 
