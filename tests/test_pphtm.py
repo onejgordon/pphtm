@@ -11,16 +11,16 @@ from nupic.encoders.scalar import ScalarEncoder
 from encoders import SimpleFullWidthEncoder
 
 USE_SIMPLE_ENCODER = True
-FILENAME = "longer_char_sequences1.txt"
-SHOW_RUN_SUMMARY = True
-# FILENAME = "simple_pattern2.txt"
+# FILENAME = "longer_char_sequences1.txt"
+SHOW_RUN_SUMMARY = False
+FILENAME = "simple_pattern2.txt"
 
 class FileProcesser(object):
 
     DATA_DIR = "../data"
-    ALPHA = "ABCDEFG"
+    ALPHA = "ABCDEF"
     CROP_FILE = 300
-    N_INPUTS = 7**2
+    N_INPUTS = 6**2
 
     def __init__(self, filename=FILENAME, with_classifier=True, delay=50, animate=True):
         self.b = PPHTMBrain(min_overlap=1, r1_inputs=self.N_INPUTS)
@@ -30,6 +30,8 @@ class FileProcesser(object):
         self.current_batch_target = 0
         self.current_batch_counter = 0
         self.delay = delay
+        self.char = None
+        self.quitting = False
         if with_classifier:
             self.classifier = PPHTMPredictor(self.b, categories=self.ALPHA)
             self.classifier.initialize()
@@ -39,7 +41,7 @@ class FileProcesser(object):
         else:
             self.encoder = ScalarEncoder(n=self.N_INPUTS, w=5, minval=1, maxval=self.N_INPUTS, periodic=False, forced=True)
 
-        self.printer = CHTMPrinter(self.b, predictor=self.classifier)
+        self.printer = CHTMPrinter(self.b, predictor=self.classifier, handle_run_batch=self.start_batch, handle_quit=self.quit)
         self.printer.setup()
 
         with open(self.DATA_DIR + "/" + filename, 'r') as myfile:
@@ -52,8 +54,17 @@ class FileProcesser(object):
         return self.encoder.encode(i)
 
     def run(self):
-        self.printer.window.after(self.delay, self.process)
-        self.printer.window.mainloop()
+        self.printer.startloop(self.delay, self.process)
+
+    def start_batch(self, steps=10):
+        if steps == 0:
+            print("Running to end")
+            self.current_batch_target = self.CROP_FILE - self.cursor
+        else:
+            print("Running %d step(s)" % steps)
+            self.current_batch_target = steps
+        self.current_batch_counter = 0
+        self.process()
 
     def process(self):
         finished = self.cursor >= self.CROP_FILE
@@ -65,39 +76,30 @@ class FileProcesser(object):
                 # Process one step
                 self.cursor += 1
                 self.current_batch_counter += 1
-                char = self.data[self.cursor].upper()
-
-                inputs = self.encode_letter(char)
-                self.printer.set_raw_input(char)
+                prior_char = self.char
+                self.char = self.data[self.cursor].upper()
+                inputs = self.encode_letter(self.char)
+                self.printer.set_raw_input(self.char)
                 self.b.process(inputs, learning=True)
                 if self.classifier:
-                    self.classifier.read(char)
+                    self.classifier.read(self.char, prior_input=prior_char)
                     prediction = self.classifier.predict()
                     self.printer.set_prediction(prediction)
                 if self.animate:
                     self.printer.render()
                 batch_finished = self.current_batch_counter == self.current_batch_target
-                if batch_finished and SHOW_RUN_SUMMARY and self.current_batch_target != 1:
-                    self.printer.show_run_summary()
+                if batch_finished:
+                    if SHOW_RUN_SUMMARY and self.current_batch_target != 1:
+                        self.printer.show_run_summary()
+                self.printer.after(self.delay, self.process)
             else:
-                # Get user input for next batch
-                self.current_batch_counter = 0
-                n_steps = raw_input("Enter # of steps to run, or 0 to run to end, 'q' to quit...")
-                digit = n_steps.isdigit()
-                quit = n_steps.upper() == "Q"
-                if quit:
-                    self.printer.window.destroy()
-                    return
-                if not digit:
-                    n_steps = 1
-                else:
-                    n_steps = int(n_steps)
-                if n_steps == 0:
-                    self.current_batch_target = self.CROP_FILE - self.cursor
-                else:
-                    self.current_batch_target = n_steps
+                # Wait for user input via tkinter controller window
+                pass
 
-            self.printer.window.after(self.delay, self.process)
+
+    def quit(self):
+        print("Quitting...")
+        self.printer.destroy()
 
     def do_prediction(self):
         if self.classifier:
@@ -116,7 +118,7 @@ class FileProcesser(object):
                     if self.animate:
                         self.printer.render()
 
-        self.printer.window.destroy()
+        self.printer.destroy()
 
 def main():
     processor = FileProcesser(delay=10, animate=True, with_classifier=True)

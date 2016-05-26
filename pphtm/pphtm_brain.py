@@ -61,13 +61,10 @@ class Segment(object):
             cell_x, cell_y = util.coords_from_index(self.cell.index, self.region._cell_side_len())
             for source in range(n_inputs):
                 # Loop through all inputs and randomly choose to create synapse or not
-                if self.region.brain.PROXIMITY_WEIGHTING:
-                    input_x, input_y = util.coords_from_index(source, self.region._input_side_len())
-                    dist = util.distance((cell_x, cell_y), (input_x, input_y))
-                    max_distance = self.region.diagonal
-                    chance_of_synapse = ((self.region.brain.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE - self.region.brain.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE) * (1 - float(dist)/max_distance)) + self.region.brain.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE
-                else:
-                    chance_of_synapse = self.region.brain.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE
+                input_x, input_y = util.coords_from_index(source, self.region._input_side_len())
+                dist = util.distance((cell_x, cell_y), (input_x, input_y))
+                max_distance = self.region.diagonal
+                chance_of_synapse = ((self.region.brain.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE - self.region.brain.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE) * (1 - float(dist)/max_distance)) + self.region.brain.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(source)
@@ -142,8 +139,11 @@ class Segment(object):
         return None
 
     def decay_permanences(self):
+        '''Reduce connected permanences by a small decay factor.
+        '''
         factor = self.region.brain.SYNAPSE_DECAY
-        self.syn_permanences = [max(p - factor, 0.0) for p in self.syn_permanences]
+        for syn in self.connected_synapses():
+            self.syn_permanences[syn] -= factor
 
     def distance_from(self, coords_xy, index=0):
         source_xy = util.coords_from_index(self.syn_sources[index], self.region._input_side_len())
@@ -338,7 +338,7 @@ class Region(object):
         # Region constants (spatial)
         self.permanence_inc = self.brain.INIT_PERMANENCE_LEARN_INC_CHANGE
         self.permanence_dec = self.brain.INIT_PERMANENCE_LEARN_DEC_CHANGE
-        self.inhibition_radius = 0 # Average connected receptive field size of the columns
+        self.inhibition_radius = 0
 
         # Hierarchichal setup
         self.n_cells = n_cells
@@ -517,7 +517,7 @@ class Region(object):
 
         TODO: Try modulating weighting based on recent distal/topdown vs proximal activity
         '''
-        self.pre_activation = (self.brain.OVERLAP_WEIGHT * self.overlap) + (self.brain.BIAS_WEIGHT * self.bias)
+        self.pre_activation = (self.brain.OVERLAP_WEIGHT * self.overlap) * (1 + (self.brain.BIAS_WEIGHT * self.bias))
         active = np.zeros(len(self.cells))
         for c in self.cells:
             pa = self.pre_activation[c.index]
@@ -576,14 +576,11 @@ class Region(object):
         On activating cells, increase permenences for each excitatory synapse above a min. contribution
         On non-activating cells, increase permenences for each inhibitory synapse above a min. contribution
 
-        # TODO: top-down learning
-
         '''
         n_increased_prox = n_decreased_prox = n_increased_dist = n_decreased_dist = n_conn_prox = n_discon_prox = n_conn_dist = n_discon_dist = 0
         for i, is_activating in enumerate(activating):
             cell = self.cells[i]
-            # Proximal
-            # TODO: Also hold pre-learn segment activation for proximal
+            # Proximal learning
             if is_activating:
                 for seg in cell.proximal_segments:
                     ni, nd, nc, ndc = self.learn_segment(seg, is_activating=is_activating)
@@ -591,11 +588,9 @@ class Region(object):
                     n_decreased_prox += nd
                     n_conn_prox += nc
                     n_discon_prox += ndc
-            # Distal
+
+            # Distal learning
             any_active = any([seg.active() for seg in cell.distal_segments])
-            # most_active = None
-            # if not any_active:
-            #     most_active = cell.most_active_segment(type="distal")
             for seg in cell.distal_segments:
                 active = seg.active_before_learning
                 do_learn = is_activating and (active or not any_active)
@@ -610,7 +605,7 @@ class Region(object):
                     seg.decay_permanences()
                     seg.syn_change = [0 for x in seg.syn_change]
 
-            # Top-down
+            # Top-down learning
             any_active = any([seg.active() for seg in cell.topdown_segments])
             for seg in cell.topdown_segments:
                 active = seg.active_before_learning
@@ -663,7 +658,7 @@ class Region(object):
         min_positive_radius = 1.0
         if self.inhibition_radius and self.inhibition_radius < min_positive_radius:
             self.inhibition_radius = min_positive_radius
-        # log("Setting inhibition radius to %s" % self.inhibition_radius)
+        log("Setting inhibition radius to %s" % self.inhibition_radius)
 
     def tempero_spatial_pooling(self, learning_enabled=True):
         '''
@@ -769,13 +764,13 @@ class PPHTMBrain(object):
         self.TOPDOWN_SYNAPSE_CHANCE = 0.5
         self.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.5
         self.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.1
-        self.CELLS_PER_REGION = 12**2
-        self.N_REGIONS = 2
+        self.CELLS_PER_REGION = 9**2
+        self.N_REGIONS = 1
         self.BIAS_WEIGHT = 0.6
-        self.OVERLAP_WEIGHT = 0.8
+        self.OVERLAP_WEIGHT = 0.6
         self.FADE_RATE = 0.5
         self.DISTAL_SEGMENTS = 3
-        self.PROX_SEGMENTS = 1
+        self.PROX_SEGMENTS = 2
         self.TOPDOWN_SEGMENTS = 1 # Only relevant if >1 region
         self.SYNAPSE_DECAY = 0.0008
         self.INIT_PERMANENCE_LEARN_INC_CHANGE = 0.04
@@ -784,7 +779,6 @@ class PPHTMBrain(object):
         self.SYNAPSE_ACTIVATION_LEARN_THRESHHOLD = 0.8
         self.DISTAL_BOOST_MULT = 0.02
         self.INHIBITION_RADIUS_DISCOUNT = 0.8
-        self.PROXIMITY_WEIGHTING = 1
         self.DO_BOOSTING = 1
 
     def __repr__(self):
@@ -839,8 +833,6 @@ class PPHTMBrain(object):
             self.INHIBITION_RADIUS_DISCOUNT = params.get('INHIBITION_RADIUS_DISCOUNT')
         if 'DO_BOOSTING' in params:
             self.DO_BOOSTING = params.get('DO_BOOSTING')
-        if 'PROXIMITY_WEIGHTING' in params:
-            self.PROXIMITY_WEIGHTING = params.get('PROXIMITY_WEIGHTING')
 
         if n_inputs is not None:
             self.n_inputs = n_inputs

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from __future__ import print_function
+
 from Tkinter import *
 import math
 import util
@@ -8,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 REGION_BUFFER = 20
-CELL_PX = 10
+CELL_PX = 8
 GRID_OUTLINE = "#555555"
 VIEWABLE_SEGMENTS = 3
 INDICATOR_DIAMETER = CELL_PX / 2
@@ -16,12 +18,6 @@ LABEL_GAP = 30
 LABEL_SIZE = 10
 VALUE_SIZE = 25
 ROLLING_PREDICTION_COUNT = 20
-
-################
-# TODO
-# Print segment activation (seems that some segments are not activating when they should)
-# Class for region printer to more gracefully handle multiple regions
-################
 
 ################
 # Chart Key
@@ -41,7 +37,7 @@ ROLLING_PREDICTION_COUNT = 20
 # SYNAPSE GRIDS
 # -------------
 # These show a detail for a single selected cell
-# Each grid shows connections from a particular distal segment
+# Each grid shows connections from a particular distal or proximal segment
 # - Brightness of cell is permanence
 # - Orange outlines indicate synapses that are contributing
 # - Cell indicator indicates permanence increase (white) or decrease (black)
@@ -50,8 +46,9 @@ ROLLING_PREDICTION_COUNT = 20
 #   * Blue: Learning
 #   * Green: Learning AND Active
 
+# PREDICTION GRIDS
+# ----------------
 
-# Note: topdown and proximal (feed-forward) connections not shown
 
 class VIEW():
     INPUTS = 1
@@ -159,7 +156,7 @@ class VIEW():
         return (region.bias[index], None, ol)
 
     @staticmethod
-    def draw_cell_synapses(printer, cell, index, segment_index=0, post_step=False):
+    def draw_cell_synapses(printer, cell, index, segment_index=0, post_step=False, segment_type='distal'):
         '''
         Draw a single grid showing synapses for one distal segment
 
@@ -172,8 +169,13 @@ class VIEW():
         ol = None
         if index == printer.focus_cell_index:
             ol = "#fff"
-        if segment_index < len(cell.distal_segments):
-            seg = cell.distal_segments[segment_index]
+        segs = []
+        if segment_type == 'distal':
+            segs = cell.distal_segments
+        elif segment_type == 'proximal':
+            segs = cell.proximal_segments
+        if segment_index < len(segs):
+            seg = segs[segment_index]
             if index in seg.syn_sources:
                 # There is a synapse here
                 syn_index = seg.syn_sources.index(index)
@@ -221,18 +223,23 @@ DRAW_FN = {
     VIEW.POSTBIAS: VIEW.draw_post_bias
 }
 
-class CHTMPrinter(object):
+class CHTMPrinter(Tk):
 
-    def __init__(self, brain, predictor=None):
+    def __init__(self, brain, predictor=None, handle_run_batch=None, handle_quit=None, *args, **kwargs):
+        Tk.__init__(self, *args, **kwargs)
         self.brain = brain
         self.predictor = predictor
-        self.window, self.canvas = None, None
-        self.cell_window, self.cell_canvas = None, None
-        self.predictor_window, self.predictor_canvas = None, None
-
+        self.max_side = math.sqrt(brain.CELLS_PER_REGION) * CELL_PX
+        self.handle_run_batch = handle_run_batch
+        self.handle_quit = handle_quit
         self.focus_cell_index = None
         self.rolling_prediction_correct = []
         self.menubar = None
+
+        # Windows
+        self.main_window = None
+        self.cell_window = None
+        self.predictor_window = None
 
         # State
         self.view_toggles = []
@@ -245,118 +252,151 @@ class CHTMPrinter(object):
         self.prediction_correct_history = []
         self.rolling_match_history = []
 
-        # Canvas items
-        self.labeled_values = {} # string key -> canvas item
-        self.main_grids = []
-        self.cell_grids = []
-        self.predictor_grids = []
-
     def setup(self):
-        self.window = Tk()
+        self.main_window = MainWindow(self, self.brain, on_focus_cell=self.focus_cell, max_side=self.max_side)
+        self.cell_window = CellWindow(self, max_side=self.max_side, cpr=self.brain.CELLS_PER_REGION)
 
-        max_height = max_side = max_cells = 0
-        top = REGION_BUFFER
-
-        # Main canvas
-        self.canvas = Canvas(self.window)
-
-        # Create input grid
-        draw_fn = partial(VIEW.draw_input, self)
-        input_rc = CellGrid(REGION_BUFFER, top, self.brain.n_inputs, canvas=self.canvas, cell_draw_fn=draw_fn, view_type=VIEW.INPUTS, title="Inputs") # Inputs
-        self.main_grids.append(input_rc)
-        x, _y = input_rc.bottom_right()
-
-        # Create main region grids
-        for r in self.brain.regions:
-            y = top
-            side = r._cell_side_len()
-            for view_index, view_type in enumerate(VIEW.DRAW):
-                draw_fn = partial(DRAW_FN.get(view_type), self, r)
-                on_cell_click = partial(self.focus_cell, r)
-                max_value = VIEW.MAX_VALUE.get(view_type)
-                grid_title = VIEW.LABEL.get(view_type)
-                if max_value is None:
-                    max_value = 1.0
-                cg = CellGrid(x + REGION_BUFFER, y, r.n_cells, canvas=self.canvas, window=self.window, view_type=view_type, cell_draw_fn=draw_fn, on_cell_click=on_cell_click, max_value=max_value, title=grid_title)
-                if cg.side > max_side:
-                    max_side = cg.side * CELL_PX
-                if cg.n_cells > max_cells:
-                    max_cells = cg.n_cells
-                self.main_grids.append(cg)
-                _x, y = cg.bottom_right()
-                if y > max_height:
-                    max_height = y
-                y += REGION_BUFFER
-
-            x = _x + REGION_BUFFER
-
-        main_width = x+REGION_BUFFER
-        main_height = max_height+REGION_BUFFER
-        self.canvas.config(width=main_width, height=main_height)
-        self.canvas.pack()
-
-        self._setup_labeled_value("last_input", label="Last Input", x=input_rc.x_middle(), y=main_height - 220, color="#CCC")
-        self._setup_labeled_value("raw_input", label="Raw Input", x=input_rc.x_middle(), y=main_height - 180, color="#000")
-        self._setup_labeled_value("prediction", label="Prediction", x=input_rc.x_middle(), y=main_height - 140, color="#ccc12a")
-        self._setup_labeled_value("rolling_prediction_correct", label="Prediction Matches", x=input_rc.x_middle(), y=main_height - 100, color="#000")
-        self._setup_labeled_value("time", label="Time Step", x=input_rc.x_middle(), y=main_height - 60, color="#000")
-
-        # Cell detail window & canvas
-        width = max_side + 2*REGION_BUFFER
-        height = VIEWABLE_SEGMENTS * (max_side + REGION_BUFFER) + REGION_BUFFER
-        self.cell_window = Toplevel()
-        self.cell_canvas = Canvas(self.cell_window, width=width, height=height)
-        self.cell_canvas.pack()
-
-        for i in range(VIEWABLE_SEGMENTS):
-            draw_fn = None
-            grid_outline_fn = None
-            on_cell_click = partial(self.focus_synapse, r, i)
-            cg = CellGrid(REGION_BUFFER, (i * (max_side + REGION_BUFFER)) + REGION_BUFFER, r.n_cells, canvas=self.cell_canvas, window=self.window, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=0.5, on_cell_click=on_cell_click, title="Synapses - S%d" % (i+1))
-            self.cell_grids.append(cg)
+        self.main_window.move(x=self.cell_window.width, y=0)
+        self.geometry('%dx%d+%d+%d' % (200, 150, 0, 400))
 
         # Predictor window & canvas
-
         if self.predictor:
-            raw_inputs = self.predictor.categories
-            pwidth = len(raw_inputs) * (max_side + REGION_BUFFER) + REGION_BUFFER
-            pheight = max_side + 2*REGION_BUFFER
-            self.predictor_window = Toplevel()
-            self.predictor_canvas = Canvas(self.predictor_window, width=pwidth, height=pheight)
-            self.predictor_canvas.pack()
-
-            x = REGION_BUFFER
-            for ri in raw_inputs:
-                draw_fn = partial(self.predictor_draw_fn, ri)
-                cg = CellGrid(x, REGION_BUFFER, r.n_cells, canvas=self.predictor_canvas, window=self.predictor_window, view_type=VIEW.PREDICTOR, cell_draw_fn=draw_fn, saturate_value=0.2, max_value=0.5, title=ri)
-                self.predictor_grids.append(cg)
-                x += max_side + REGION_BUFFER
-
-        # Initialize all cell grids
-        for cg in self.main_grids:
-            cg.initialize()
-        for cg in self.cell_grids:
-            cg.initialize()
-        if self.predictor:
-            for cg in self.predictor_grids:
-                cg.initialize()
+            self.predictor_window = PredictorWindow(self, predictor=self.predictor, max_side=self.max_side, cpr=self.brain.CELLS_PER_REGION)
+            self.predictor_window.move(self.main_window.width + self.cell_window.width)
 
         # Create menu
-        self.menubar = Menu(self.window)
+        self.menubar = Menu(self)
         action_menu = Menu(self.menubar, tearoff=0)
-        # action_menu.add_command(label="Toggle Next Bias Showing", command=partial(self.toggle_view, 'next_bias'))
+        file_menu = Menu(self.menubar, tearoff=0)
+        file_menu.add_command(label="Quit", command=self.handle_quit)
         action_menu.add_command(label="Segment Activation Showing", command=partial(self.toggle_view, 'segment_activation'))
         action_menu.add_command(label="Segment Post Step", command=partial(self.toggle_view, 'segment_post_step'))
         action_menu.add_command(label="Show Predicted Associations", command=partial(self.toggle_view, 'predicted_associations'))
+        action_menu.add_command(label="Show Predicted Associations", command=partial(self.toggle_view, 'predicted_associations'))
+        self.menubar.add_cascade(label="File", menu=file_menu)
         self.menubar.add_cascade(label="Action", menu=action_menu)
-        self.window.config(menu=self.menubar)
+        self.config(menu=self.menubar)
 
-        cell_width = width
-        # Move main window to right of cell
-        self.window.geometry('%dx%d+%d+%d' % (main_width, main_height, cell_width, 0))
-        # Move predictor window to right of main window
-        if self.predictor:
-            self.predictor_window.geometry('%dx%d+%d+%d' % (pwidth, pheight, cell_width + main_width, 0))
+        # Controls
+        Label(self, text="Batch Size").grid(row=0)
+        self.batch_entry = Entry(self)
+        self.batch_entry.grid(row=1)
+        b = Button(self, text="Run", command=self.parse_batch_size)
+        b.grid(row=2)
+        b = Button(self, text="Quit", command=self.handle_quit)
+        b.grid(row=3)
+
+    def parse_batch_size(self):
+        _steps = self.batch_entry.get()
+        if not _steps:
+            steps = 1
+        if _steps.isdigit():
+            steps = int(_steps)
+        self.handle_run_batch(steps)
+
+
+    def startloop(self, delay, fn):
+        self.after(delay, fn)
+        print("Startig main loop...")
+        self.mainloop()
+
+
+    def toggle_view(self, toggle):
+        if toggle in self.view_toggles:
+            self.view_toggles.remove(toggle)
+        else:
+            self.view_toggles.append(toggle)
+
+
+    def view_active(self, view):
+        return view in self.view_toggles
+
+    def set_raw_input(self, ri):
+        if self.raw_input:
+            self.last_raw_input = self.raw_input
+        self.raw_input = ri
+        self.prediction_correct = self.prediction and self.prediction == self.raw_input
+        util.rolling_list(self.rolling_prediction_correct, length=ROLLING_PREDICTION_COUNT, new_value=1 if self.prediction_correct else 0)
+
+    def set_prediction(self, prediction):
+        self.prediction = prediction
+
+    def focus_cell(self, region, index):
+        if index < len(region.cells):
+            self.focus_cell_index = index
+            cell = region.cells[index]
+            self.cell_window.wm_title("Cell %d" % index)
+            print("Focusing on %s" % (cell))
+            for si, cg in enumerate(self.cell_window.grids):
+                post_step = self.view_active('segment_post_step')
+                if cg.tag == 'distal':
+                    cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=si, post_step=post_step, segment_type=cg.tag)
+                    cg.grid_outline_fn = partial(VIEW.segment_learning, cell, segment_index=si, post_step=post_step)
+                elif cg.tag == 'proximal':
+                    cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=si, post_step=post_step, segment_type=cg.tag)
+                cg.render()
+
+            if self.predictor_window:
+                for si, cg in enumerate(self.predictor_window.grids):
+                    cg.render()
+
+    def render(self):
+        for window in [self.main_window, self.cell_window, self.predictor_window]:
+            if window:
+                window.render(self.focus_cell_index)
+
+        rolling_average = util.average(self.rolling_prediction_correct)
+        self.rolling_match_history.append(rolling_average)
+        self.prediction_correct_history.append(self.prediction_correct)
+        self.main_window.update_values(last_input=self.last_raw_input, raw_input=self.raw_input,
+            prediction=self.prediction, prediction_correct=self.prediction_correct,
+            rolling_average=rolling_average, time=str(self.brain.t))
+
+    def show_run_summary(self):
+        bar_vals = self.rolling_match_history
+        bar_colors = self.prediction_correct_history
+
+        ind = np.arange(len(bar_vals))  # the x locations for the groups
+        width = 1.0       # the width of the bars
+
+        fig, ax = plt.subplots()
+        rects1 = ax.bar(ind, bar_vals, width, color=['g' if match else 'r' for match in bar_colors])
+
+        ax.set_title("Prediction improvement over time")
+        ax.set_ylabel('Rolling Prediction Match (%)')
+        ax.set_xlabel('Time Step')
+        plt.show(block=False)
+
+class CanvasWindow(Toplevel):
+
+    def __init__(self, master, width=100, height=100):
+        Toplevel.__init__(self, master)
+        self.width = width
+        self.height = height
+        self.master = self.printer = master
+        self.grids = []
+        self.labeled_values = {} # string key -> canvas item
+        self.canvas = Canvas(self, width=width, height=height)
+        self.canvas.pack()
+
+    def set_size(self, width=100, height=100):
+        self.width = width
+        self.height = height
+        self.canvas.config(width=width, height=height)
+
+    def move(self, x=0, y=0):
+        self.geometry('%dx%d+%d+%d' % (self.width, self.height, x, y))
+
+    def add_grid(self, cg):
+        self.grids.append(cg)
+
+    def initialize_grids(self):
+        for cg in self.grids:
+            cg.initialize()
+
+    def render(self, focus_cell_index=None):
+        for cg in self.grids:
+            cg.render(focus_index=focus_cell_index)
 
     def _setup_labeled_value(self, key, label="Label", value="N/A", x=0, y=0, color="#000"):
         # Setup label
@@ -372,7 +412,126 @@ class CHTMPrinter(object):
                 kwargs['fill'] = color
             self.canvas.itemconfig(lv, text=value, **kwargs)
 
-    def predictor_draw_fn(self, raw_input, index):
+
+class MainWindow(CanvasWindow):
+
+    def __init__(self, master, brain, on_focus_cell=None, max_side=100, *args, **kwargs):
+        CanvasWindow.__init__(self, master, *args, **kwargs)
+        self.brain = brain
+        self.printer = master
+        top = REGION_BUFFER
+
+        max_height = max_cells = 0
+
+        # Create input grid
+        draw_fn = partial(VIEW.draw_input, self)
+        input_rc = CellGrid(REGION_BUFFER, top, self.brain.n_inputs, canvas=self.canvas, cell_draw_fn=draw_fn, view_type=VIEW.INPUTS, title="Inputs") # Inputs
+        self.add_grid(input_rc)
+        x, _y = input_rc.bottom_right()
+        # Create region grids
+        for r in self.brain.regions:
+            y = top
+            side = r._cell_side_len()
+            for view_index, view_type in enumerate(VIEW.DRAW):
+                draw_fn = partial(DRAW_FN.get(view_type), self.printer, r)
+                on_cell_click = partial(on_focus_cell, r)
+                max_value = VIEW.MAX_VALUE.get(view_type)
+                grid_title = VIEW.LABEL.get(view_type)
+                if max_value is None:
+                    max_value = 1.0
+                cg = CellGrid(x + REGION_BUFFER, y, r.n_cells, canvas=self.canvas, view_type=view_type, cell_draw_fn=draw_fn, on_cell_click=on_cell_click, max_value=max_value, title=grid_title)
+                if cg.side > max_side:
+                    max_side = cg.side * CELL_PX
+                if cg.n_cells > max_cells:
+                    max_cells = cg.n_cells
+                self.add_grid(cg)
+                _x, y = cg.bottom_right()
+                if y > max_height:
+                    max_height = y
+                y += REGION_BUFFER
+
+            x = _x + REGION_BUFFER
+
+        main_width = x+REGION_BUFFER
+        main_height = max_height+REGION_BUFFER
+
+        self._setup_labeled_value("last_input", label="Last Input", x=input_rc.x_middle(), y=main_height - 220, color="#CCC")
+        self._setup_labeled_value("raw_input", label="Raw Input", x=input_rc.x_middle(), y=main_height - 180, color="#000")
+        self._setup_labeled_value("prediction", label="Prediction", x=input_rc.x_middle(), y=main_height - 140, color="#ccc12a")
+        self._setup_labeled_value("rolling_prediction_correct", label="Pred. Matches", x=input_rc.x_middle(), y=main_height - 100, color="#000")
+        self._setup_labeled_value("time", label="Time Step", x=input_rc.x_middle(), y=main_height - 60, color="#000")
+
+        self.set_size(width=main_width, height=main_height)
+        self.initialize_grids()
+
+    def update_values(self, last_input=None, raw_input=None, prediction=None,
+            prediction_correct=False, rolling_average=None, time=0):
+        if last_input:
+            self._update_labeled_value('last_input', value=last_input)
+        if raw_input:
+            color = '#14FF49' if prediction_correct else '#000000'
+            self._update_labeled_value('raw_input', value=raw_input, color=color)
+        if prediction:
+            self._update_labeled_value('prediction', value=prediction)
+        if rolling_average:
+            self._update_labeled_value('rolling_prediction_correct', value="%.2f" % rolling_average)
+        self._update_labeled_value('time', value=time)
+
+
+class CellWindow(CanvasWindow):
+
+    def __init__(self, master, max_side=100, cpr=100):
+        CanvasWindow.__init__(self, master)
+        self.region = None
+        width = 2*max_side + 3*REGION_BUFFER
+        height = VIEWABLE_SEGMENTS * (max_side + REGION_BUFFER) + REGION_BUFFER
+        self.set_size(width, height)
+
+        for i in range(VIEWABLE_SEGMENTS):
+            draw_fn = None
+            grid_outline_fn = None
+            on_cell_click = partial(self.focus_synapse, self.region, i)
+            # Proximal seg
+            self.add_grid(CellGrid(REGION_BUFFER, (i * (max_side + REGION_BUFFER)) + REGION_BUFFER, cpr, canvas=self.canvas, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=0.5, on_cell_click=on_cell_click, title="Proximal Seg %d" % (i+1), tag="proximal"))
+            # Distal seg
+            self.add_grid(CellGrid(2*REGION_BUFFER + max_side, (i * (max_side + REGION_BUFFER)) + REGION_BUFFER, cpr, canvas=self.canvas, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=0.5, on_cell_click=on_cell_click, title="Distal Seg %d" % (i+1), tag="distal"))
+        self.initialize_grids()
+
+    def focus_synapse(self, region, segment_index, index):
+        if self.printer.focus_cell_index:
+            cell = region.cells[self.printer.focus_cell_index]
+            seg = cell.distal_segments[segment_index]
+            perm, contr, last_change = seg.synapse_state(index)
+            print("Synapse focus_cell=%s source_index=%s permanence=%s contribution=%s last_change=%s" % (self.focus_cell_index, index, perm, contr, last_change))
+
+
+class PredictorWindow(CanvasWindow):
+
+    def __init__(self, master, predictor=None, max_side=100, cpr=100):
+        CanvasWindow.__init__(self, master)
+        self.printer = master
+        self.predictor = predictor
+        raw_inputs = self.predictor.categories
+        pwidth = len(raw_inputs) * (max_side + REGION_BUFFER) + REGION_BUFFER
+        pheight = (len(raw_inputs)+1) * (max_side + REGION_BUFFER) + REGION_BUFFER
+        self.set_size(pwidth, pheight)
+
+        x = REGION_BUFFER
+        for ri in raw_inputs:
+            draw_fn = partial(self.overlap_draw_fn, ri)
+            input_overlap_cg = CellGrid(x, REGION_BUFFER, cpr, canvas=self.canvas, view_type=VIEW.PREDICTOR, cell_draw_fn=draw_fn, saturate_value=0.2, max_value=0.5, title=ri)
+            self.add_grid(input_overlap_cg)
+            # Create an NxN grid of grids showing activations of input y followed by input x
+            y = 2*REGION_BUFFER + max_side
+            for ri_prior in raw_inputs:
+                draw_fn = partial(self.sequence_draw_fn, ri_prior, ri)
+                title = "(%s)%s" % (ri_prior, ri)
+                self.add_grid(CellGrid(x, y, cpr, canvas=self.canvas, view_type=VIEW.ACTIVATION, cell_draw_fn=draw_fn, saturate_value=0.2, max_value=0.5, title=title))
+                y += max_side + REGION_BUFFER
+            x += max_side + REGION_BUFFER
+        self.initialize_grids()
+
+    def overlap_draw_fn(self, raw_input, index):
         region = self.predictor.region
         last_overlap_for_input = self.predictor.overlap_lookup.get(raw_input)
         value = 0
@@ -383,7 +542,7 @@ class CHTMPrinter(object):
         cell = region.cells[index]
         predicted = value and bias
         associated = False
-        if value and self.view_active("predicted_associations"):
+        if value and self.printer.view_active("predicted_associations"):
             # Highlight cells with distal links to any predicted cells
             indexes = np.nonzero(region.bias)
             for idx in indexes[0]:
@@ -399,91 +558,22 @@ class CHTMPrinter(object):
             ind_color = "#FF1A0E"
         return (value, ind_color, ol_color)
 
-    def toggle_view(self, toggle):
-        if toggle in self.view_toggles:
-            print "Disabling", toggle
-            self.view_toggles.remove(toggle)
-        else:
-            print "Enabling", toggle
-            self.view_toggles.append(toggle)
-
-    def view_active(self, view):
-        return view in self.view_toggles
-
-    def set_raw_input(self, ri):
-        if self.raw_input:
-            self.last_raw_input = self.raw_input
-        self.raw_input = ri
-        self.prediction_correct = self.prediction and self.prediction == self.raw_input
-        util.rolling_list(self.rolling_prediction_correct, length=ROLLING_PREDICTION_COUNT, new_value=1 if self.prediction_correct else 0)
-
-    def set_prediction(self, prediction):
-        self.prediction = prediction
-
-    def render(self):
-        for cg in self.main_grids + self.cell_grids + self.predictor_grids:
-            cg.render(self.focus_cell_index)
-
-        r = self.brain.regions[0]
-        if self.last_raw_input:
-            self._update_labeled_value('last_input', value=self.last_raw_input)
-        if self.raw_input:
-            color = '#14FF49' if self.prediction_correct else '#000000'
-            self._update_labeled_value('raw_input', value=self.raw_input, color=color)
-        if self.prediction:
-            self._update_labeled_value('prediction', value=self.prediction)
-        rolling_average = util.average(self.rolling_prediction_correct)
-        self._update_labeled_value('rolling_prediction_correct', value="%.2f" % rolling_average)
-        self._update_labeled_value('time', value=str(self.brain.t))
-        self.rolling_match_history.append(rolling_average)
-        self.prediction_correct_history.append(self.prediction_correct)
-
-    def focus_cell(self, region, index):
-        if index < len(region.cells):
-            self.focus_cell_index = index
-            cell = region.cells[index]
-            self.cell_window.wm_title("Cell %d" % index)
-            print "Focusing on %s" % (cell)
-            for si, cg in enumerate(self.cell_grids):
-                post_step = self.view_active('segment_post_step')
-                cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=si, post_step=post_step)
-                cg.grid_outline_fn = partial(VIEW.segment_learning, cell, segment_index=si, post_step=post_step)
-                cg.render()
-
-            for si, cg in enumerate(self.predictor_grids):
-                cg.render()
-
-    def focus_synapse(self, region, segment_index, index):
-        if self.focus_cell_index:
-            cell = region.cells[self.focus_cell_index]
-            seg = cell.distal_segments[segment_index]
-            perm, contr, last_change = seg.synapse_state(index)
-            print "Synapse focus_cell=%s source_index=%s permanence=%s contribution=%s last_change=%s" % (self.focus_cell_index, index, perm, contr, last_change)
-
-    def show_run_summary(self):
-        bar_vals = self.rolling_match_history
-        bar_colors = self.prediction_correct_history
-
-        ind = np.arange(len(bar_vals))  # the x locations for the groups
-        width = 1.0       # the width of the bars
-
-        fig, ax = plt.subplots()
-        rects1 = ax.bar(ind, bar_vals, width, color=['g' if match else 'r' for match in bar_colors])
-
-        ax.set_title("Prediction improvement over time")
-        ax.set_ylabel('Rolling Prediction Match (%)')
-        ax.set_xlabel('Time Step')
-        # ax.set_xticks(ind + width)
-        # ax.set_xticklabels(range(len(bar_vals)))
-
-        plt.show(block=False)
+    def sequence_draw_fn(self, raw_input, raw_input2, index):
+        region = self.predictor.region
+        key = raw_input + raw_input2
+        last_activation_for_input_seq = self.predictor.activation_lookup.get(key)
+        value = 0
+        ind_color = ol_color = None
+        if last_activation_for_input_seq is not None:
+            value = last_activation_for_input_seq[index]
+        return (value, ind_color, ol_color)
 
 class CellGrid(object):
     '''
     Canvas to draw a view of one region and handle clicks
     '''
 
-    def __init__(self, x, y, n_cells, canvas=None, window=None, view_type=None, cell_draw_fn=None, grid_outline_fn=None, on_cell_click=None, max_value=1.0, saturate_value=1.0, title=None):
+    def __init__(self, x, y, n_cells, canvas=None, view_type=None, cell_draw_fn=None, grid_outline_fn=None, on_cell_click=None, max_value=1.0, saturate_value=1.0, title=None, tag=None):
         self.x, self.y = x, y # upper left
         self.n_cells = n_cells
         self.max_value = max_value
@@ -491,20 +581,19 @@ class CellGrid(object):
         self.saturate_color = None
         self.side = math.sqrt(n_cells)
         self.canvas = canvas
-        self.window = window
         self.view_type = view_type
         self.cell_draw_fn = cell_draw_fn
         self.grid_outline_fn = grid_outline_fn
         self.on_cell_click = on_cell_click # fn
         self.cell_rects = []
         self.hl_indicators = []
-        self.prior_activations = []
         self.temporary_widgets = []
         self.title = title
         self.hl = None
+        self.tag = tag
 
     def __str__(self):
-        return "View (type %d)" % (self.view_type)
+        return "View (type %d, xy: %s, %s)" % (self.view_type, self.x, self.y)
 
     def initialize(self):
         # Create frame background
@@ -513,22 +602,23 @@ class CellGrid(object):
         # Create cell rects & highlight items for rendering
         for index in range(self.n_cells):
             abs_x, abs_y = self._cell_position(index)
-            cell_rect = self.canvas.create_rectangle(abs_x, abs_y, abs_x + CELL_PX, abs_y + CELL_PX, outline=GRID_OUTLINE)
-            self.canvas.tag_bind(cell_rect, "<Button-1>", self.handle_click)
+            cell_rect = self.canvas.create_rectangle(abs_x, abs_y, abs_x + CELL_PX, abs_y + CELL_PX, outline=GRID_OUTLINE, tags="cell_clickable")
             self.cell_rects.append(cell_rect)
             # Create indicator
             abs_x += CELL_PX / 4
             abs_y += CELL_PX / 4
             x_br = abs_x + INDICATOR_DIAMETER
             y_br = abs_y + INDICATOR_DIAMETER
-            hl_indicator = self.canvas.create_oval(abs_x, abs_y, x_br, y_br, fill="", outline="")
-            self.canvas.tag_bind(hl_indicator, "<Button-1>", self.handle_click)
+            hl_indicator = self.canvas.create_oval(abs_x, abs_y, x_br, y_br, fill="", outline="", tags="cell_clickable")
             self.hl_indicators.append(hl_indicator)
+            self.canvas.tag_bind(cell_rect, "<Button-1>", self.handle_click)
+            self.canvas.tag_bind(hl_indicator, "<Button-1>", self.handle_click)
         if self.title:
             self.canvas.create_text((self.x, self.y - 9), text=self.title, fill="#000", font=("Purisa", 11), anchor="w")
+        # print("Initialized %s" % self)
 
     def _cell_position(self, index):
-        ''' Return (x,y)'''
+        '''Return (x,y)'''
         x, y = util.coords_from_index(index, self.side)
         abs_x, abs_y = (x*CELL_PX + self.x, y*CELL_PX + self.y)
         return (abs_x, abs_y)

@@ -2,16 +2,17 @@
 
 ## Implementation TODO
 
-* When proximity weighting is off, we need to use a different calc. for inhibition radius (since ave receptive field size is max)
-* Linear regression on swarm runs to show stat. sig. of any relationships
-* Top down learning
-* How dow e form invariant structures?
+* How do we form invariant structures?
 * Drastic fluctuation in number of cells active (kth_score logic issue?)
+* Linear regression on swarm runs to show stat. sig. of any relationships
+* Printing proximal connections
+* Redo printer with custom Widgets()
 
 ## Algorithm TODO
 
+* Prediction may be undermined by topdown. Consider relative bias strength in prediction matching?
 * Does formation of invariant structures require lower-level slowness?
-	- E.g. ABC retains enough of AB to fire higher level SDR representing ABC
+	- E.g. AB'C retains enough of AB' to fire higher level SDR representing AB'C
 * Do we need more distal activation? Overlap instead of subset?
 * Should we try boosting distal synapses if active duty cycle low?
 * We need to unlearn synapses that lead to bias noise.
@@ -19,17 +20,12 @@
 ## PP TODO
 
 * How is precision weighting modeled?
-* How dow e form invariant structures?
 * How to code error signal? Predictions? (error is only output of a region, not neurono-based?)
 * What is difference between prediction and activation?
 	- HTM says this is NMDA spike from distal connections -> predicted cell state
 	- *new* firing at higher level region indicates 'unpdredicted' lower-level activation
 	- so new firing is probably weighted somehow -- passes on information more directly
 	- when a predicted incoming signal is passed upwards, no change occurs...
-* Can we simply extend distal bias from regions above?
-
-## Other TODO
-
 
 
 ## Eventual

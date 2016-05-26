@@ -19,6 +19,7 @@ class PPHTMPredictor(object):
         self.categories = categories
         self.region = None
         self.overlap_lookup = {} # raw_input (e.g. letter) -> overlap np.array
+        self.activation_lookup = {} # sequence (e.g. "BA") -> activation np.array
         # Tallies counts number of 'votes' for each input based on proximal connections
         # of r0 biased cells
         self.encoder = SimpleFullWidthEncoder(n_inputs=self.brain.n_inputs, n_cats=len(categories))
@@ -26,11 +27,12 @@ class PPHTMPredictor(object):
     def initialize(self):
         self.region = self.brain.regions[0]
         self.overlap_lookup = {}
-
+        self.activation_lookup = {}
 
     def predict_via_overlap_lookup(self):
         '''
         Compare raw input -> overlap map to look for best match with bias
+        TODO: Should we consider both active and inactive matches?
         '''
         scores = {}
         for raw_input, overlap in self.overlap_lookup.items():
@@ -78,7 +80,10 @@ class PPHTMPredictor(object):
         '''
         return util.bool_overlap(input, tallies)
 
-    def read(self, raw_input):
+    def read(self, raw_input, prior_input=None):
         if raw_input:
             self.overlap_lookup[raw_input] = np.copy(self.region.overlap)
+            if prior_input:
+                key = prior_input + raw_input
+                self.activation_lookup[key] = np.copy(self.region.activation == 1)
 
