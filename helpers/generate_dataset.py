@@ -15,8 +15,8 @@ WORDS = [
 	"GACGF"
 ]
 
-CHANCE_NOISE = 0.01
-CHANCE_CORRUPT_WORD = 0.01
+CHANCE_NOISE = 0.0
+CHANCE_CORRUPT_WORD = 0.0
 NOISE_LEN_RANGE = (1,5)
 FILE_LEN = 1000
 
@@ -44,5 +44,7 @@ while len(data) < FILE_LEN:
 
 print "Writing %d characters to %s" % (len(data), DIR+FILENAME)
 
+# Writes all cats (chars) to first line, and full data block to second
 with open(DIR+FILENAME, "w") as text_file:
+	text_file.write(CHARS+'\n')
 	text_file.write(data)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import sys
+import sys, getopt
 from os import path
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 from pphtm.pphtm_brain import PPHTMBrain
@@ -9,6 +9,7 @@ import numpy as np
 import util
 import random
 from encoders import SimpleFullWidthEncoder
+from helpers.file_processer import FileProcesser
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
@@ -16,13 +17,7 @@ from matplotlib import cm
 
 VERBOSITY = 1
 GOOD_CUTOFF_PCT = 0.6
-FILENAME = "longer_char_sequences1.txt"
-ALPHA = "ABCDEFG" # All data in file (auto-produce?)
-# FILENAME = "simple_pattern2.txt"
-# ALPHA = "ABCDEF"
-ITERATIONS = 30
 RERUN_PARAMS = 1 # No. of runs for each randomized param set
-CROP_FILE = 150
 END_FILE_PCT = .15
 
 # values are either:
@@ -31,33 +26,31 @@ END_FILE_PCT = .15
 # - static value
 # ranges are considered integer ranges if min is an integer, otherwise continuous
 SWARM_CONFIG = {
-    'PROXIMAL_ACTIVATION_THRESHHOLD': 3,
-    'DISTAL_ACTIVATION_THRESHOLD': 2,
-    'BOOST_MULTIPLIER': 2.58, #(2.0, 3.0),
-    'DESIRED_LOCAL_ACTIVITY': 2,
-    'DISTAL_SYNAPSE_CHANCE': 0.5,
-    'TOPDOWN_SYNAPSE_CHANCE': 0.5,
-    'MAX_PROXIMAL_INIT_SYNAPSE_CHANCE': 0.6,
-    'MIN_PROXIMAL_INIT_SYNAPSE_CHANCE': 0.1,
-    'CELLS_PER_REGION': 9**2, #[6**2, 8**2, 10**2],
-    'N_REGIONS': 1,
-    'BIAS_WEIGHT': 1.0,
-    'OVERLAP_WEIGHT': 0.6,
-    'FADE_RATE': 0.7,
-    'DISTAL_SEGMENTS': 2,
-    'PROX_SEGMENTS': 2,
-    'TOPDOWN_SEGMENTS': 2, # Only relevant if >1 region
-    'SYNAPSE_DECAY': 0.0008,
-    'INIT_PERMANENCE_LEARN_INC_CHANGE': 0.03,
-    'INIT_PERMANENCE_LEARN_DEC_CHANGE': 0.003,
-    'CHANCE_OF_INHIBITORY': 0.2,
-    'SYNAPSE_ACTIVATION_LEARN_THRESHHOLD': 1.0,
-    'DISTAL_BOOST_MULT': 0.02,
-    'INHIBITION_RADIUS_DISCOUNT': 0.8,
+    # 'PROXIMAL_ACTIVATION_THRESHHOLD': 3,
+    # 'DISTAL_ACTIVATION_THRESHOLD': 2,
+    # 'BOOST_MULTIPLIER': 2.58, #(2.0, 3.0),
+    # 'DESIRED_LOCAL_ACTIVITY': 2,
+    # 'DISTAL_SYNAPSE_CHANCE': 0.5,
+    # 'TOPDOWN_SYNAPSE_CHANCE': 0.5,
+    # 'MAX_PROXIMAL_INIT_SYNAPSE_CHANCE': 0.6,
+    # 'MIN_PROXIMAL_INIT_SYNAPSE_CHANCE': 0.1,
+    'CELLS_PER_REGION': [8**2, 10**2], #[6**2, 8**2, 10**2], #[6**2, 8**2, 10**2],
+    # 'N_REGIONS': 2,
+    # 'BIAS_WEIGHT': (0.6, 1.0),
+    # 'OVERLAP_WEIGHT': (0.4, 0.6),
+    # 'FADE_RATE': (0.2, 0.6),
+    # 'DISTAL_SEGMENTS': 3,
+    # 'PROX_SEGMENTS': 2,
+    # 'TOPDOWN_SEGMENTS': 2, # Only relevant if >1 region
+    # 'SYNAPSE_DECAY': 0.0008,
+    'PERM_LEARN_INC': (0.05, 0.09),
+    'PERM_LEARN_DEC': (0.05, 0.09),
+    # 'CHANCE_OF_INHIBITORY': 0.2,
+    # 'SYNAPSE_ACTIVATION_LEARN_THRESHHOLD': 1.0,
+    # 'DISTAL_BOOST_MULT': 0.02,
+    # 'INHIBITION_RADIUS_DISCOUNT': 0.8,
     # Booleans
-    'DO_BOOSTING': 1
 }
-
 
 
 class RunResult(object):
@@ -69,13 +62,13 @@ class RunResult(object):
         self.percent_correct_end = percent_correct_end
 
     def __str__(self):
-        out = "Run Result (%d) %% correct: %.1f, %% correct end: %.1f" % (self.iteration_id, 100.0 * self.percent_correct, 100.0 * self.percent_correct_end)
+        out = "Run Result (%d) %% correct: %.1f, %% correct end: %.1f" % (self.iteration_id + 1, 100.0 * self.percent_correct, 100.0 * self.percent_correct_end)
         if self.good():
             out += " <<< GOOD"
         return out
 
     def good(self):
-        return self.percent_correct_end > GOOD_CUTOFF_PCT # TODO: customize based on ave word len
+        return self.percent_correct_end >= GOOD_CUTOFF_PCT # TODO: customize based on ave word len
 
     def print_params(self, unique_only=True):
         res = ""
@@ -87,17 +80,16 @@ class RunResult(object):
 class SwarmRunner(object):
 
     DATA_DIR = "../data"
-    N_INPUTS = 7**2
 
-    def __init__(self, filename, iterations=5):
-        self.b = PPHTMBrain(min_overlap=1, r1_inputs=self.N_INPUTS)
+    def __init__(self, filename=None, iterations=5, crop=100):
+        self.file_processer = FileProcesser(filename=filename)
+        self.cats, self.data, self.n_inputs = self.file_processer.open_file()
+        self.b = PPHTMBrain(min_overlap=1, r1_inputs=self.n_inputs)
         self.b.initialize()
-        self.classifier = PPHTMPredictor(self.b, categories=ALPHA)
-        self.filename = filename
-        self.encoder = SimpleFullWidthEncoder(n_inputs=self.N_INPUTS, n_cats=len(ALPHA))
+        self.classifier = PPHTMPredictor(self.b, categories=self.cats)
+        self.encoder = SimpleFullWidthEncoder(n_inputs=self.n_inputs, n_cats=len(self.cats))
         self.iterations = iterations
-        self.data = None
-        self.cursor = 0 # data read index
+        self.crop = crop
         self.iteration_index = 0
         self.params = {}
         self.results = {} # iteration index -> RunResult()
@@ -124,10 +116,6 @@ class SwarmRunner(object):
         i = ord(c.upper()) - 65 # A == 0
         return self.encoder.encode(i)
 
-    def _read_data(self):
-        with open(self.DATA_DIR + "/" + self.filename, 'r') as myfile:
-            self.data = myfile.read()
-
     def _choose_params(self):
         params = {}
         for key, spec in SWARM_CONFIG.items():
@@ -150,23 +138,22 @@ class SwarmRunner(object):
 
     def _run_header(self):
         res = ""
-        res += "File: %s\n" % self.filename
-        res += "N Inputs: %s\n" % self.N_INPUTS
+        res += "File: %s\n" % self.file_processer.filename
+        res += "N Inputs: %s\n" % self.n_inputs
         res += "Started: %s\n" % util.sdatetime(self.start_time)
         res += "Finished: %s\n" % util.sdatetime(self.end_time)
         res += "Duration: %s\n" % util.duration(self.start_time, self.end_time)
-        res += "Crop file: %s, End file percent: %s\n" % (CROP_FILE, END_FILE_PCT)
+        res += "Crop file: %s, End file percent: %s\n" % (self.crop, END_FILE_PCT)
         res += "Common Specs:\n"
         res += self._print_static_params()
         res += "------------------------\n\n"
         return res
 
     def run(self):
-        self._read_data()
         self.start_time = datetime.now()
         param_run_count = 1
         for i in range(self.iterations):
-            print "Running iteration %d/%d" % (i, self.iterations)
+            print "Running iteration %d/%d (crop file: %s)" % (i+1, self.iterations, self.crop)
             if self.params and param_run_count < RERUN_PARAMS:
                 print "Param run %d" % param_run_count
                 param_run_count += 1
@@ -180,23 +167,22 @@ class SwarmRunner(object):
             prediction = None
             correct_predictions = 0
             correct_predictions_end = 0
-            self.cursor = 0
+            self.file_processer.reset()
             self.classifier.initialize()
             while not done:
-                self.cursor += 1
-                char = self.data[self.cursor].upper()
+                char = self.file_processer.read_next()
                 # print "Pred: %s, char: %s" % (prediction, char)
                 correct_prediction = prediction and char == prediction
                 if correct_prediction:
                     correct_predictions += 1
-                    if (float(self.cursor) / CROP_FILE) > (1.0 - END_FILE_PCT):
+                    if (float(self.file_processer.cursor) / self.crop) > (1.0 - END_FILE_PCT):
                         correct_predictions_end += 1
                 prediction = self.process(char)
                 out_char = "P" if correct_prediction else "."
                 log(out_char, level=2)
-                done = self.cursor >= CROP_FILE
-            pct_correct = float(correct_predictions) / CROP_FILE
-            pct_correct_end = float(correct_predictions_end) / (END_FILE_PCT * CROP_FILE)
+                done = self.file_processer.cursor >= self.crop
+            pct_correct = float(correct_predictions) / self.crop
+            pct_correct_end = float(correct_predictions_end) / (END_FILE_PCT * self.crop)
             rr = RunResult(iteration_id=i, params=self.params, percent_correct=pct_correct, percent_correct_end=pct_correct_end)
             self.results[i] = rr
             log("Iteration %d/%d done - %s" % (i, self.iterations, rr))
@@ -205,8 +191,8 @@ class SwarmRunner(object):
         self.end_time = datetime.now()
         log("Swarm run done!")
         sorted_results = sorted(self.results.items(), key=lambda r : r[1].percent_correct_end)
-        fname = "Run at " + util.sdatetime(self.start_time)
-        n_good = 0
+        n_good = sum([rr[1].good() for rr in sorted_results])
+        fname = "Swarm at %s %d/%d runs good" % (util.sdatetime(self.start_time), n_good, len(sorted_results))
         with open("../outputs/%s.txt" % fname, "w") as text_file:
             text_file.write(self._run_header())
             for iteration_id, runresult in sorted_results:
@@ -214,10 +200,9 @@ class SwarmRunner(object):
                 print runresult.print_params()
                 text_file.write(str(runresult)+"\n")
                 text_file.write(runresult.print_params()+"\n")
-                if runresult.good():
-                    n_good += 1
             text_file.write(">>> %.1f <<< Percent of runs good" % (float(n_good)*100./self.iterations))
-        self.plot_results()
+        if self.iterations > 1:
+            self.plot_results()
 
     def process(self, char):
         # Process one step
@@ -262,16 +247,38 @@ class SwarmRunner(object):
             plt.title(title)
             plt.show()
         else:
-            print "Can't plot, not enough dimensions"
+            print "Not plotting, not enough dimensions"
 
 def log(message, level=1):
     if VERBOSITY >= level:
         print message
 
 
-def main():
-    swarm = SwarmRunner(FILENAME, iterations=ITERATIONS)
+def main(argv):
+    HELP = 'swarm_pphtm.py -i <iterations> -c <crop> -f <file>'
+    try:
+        opts, args = getopt.getopt(argv,"hi:c:",["iterations=","crop="])
+    except getopt.GetoptError:
+        print HELP
+        sys.exit(2)
+    # Defaults
+    kwargs = {
+        'iterations': 30,
+        'crop': 300,
+        'filename': "longer_char_sequences1.txt"
+    }
+    for opt, arg in opts:
+        if opt == '-h':
+            print HELP
+            sys.exit()
+        elif opt in ("-i", "--iterations"):
+            kwargs['iterations'] = int(arg)
+        elif opt in ("-c", "--crop"):
+            kwargs['crop'] = int(arg)
+        elif opt in ("-f", "--file"):
+            kwargs['filename'] = arg
+    swarm = SwarmRunner(**kwargs)
     swarm.run()
 
 if __name__ == "__main__":
-    main()
+   main(sys.argv[1:])

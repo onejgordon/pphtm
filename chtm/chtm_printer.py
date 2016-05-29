@@ -9,15 +9,16 @@ from functools import partial
 import numpy as np
 import matplotlib.pyplot as plt
 
-REGION_BUFFER = 20
+REGION_BUFFER = 15
 CELL_PX = 8
 GRID_OUTLINE = "#555555"
 VIEWABLE_SEGMENTS = 3
-INDICATOR_DIAMETER = CELL_PX / 2
+INDICATOR_DIAMETER = CELL_PX / 1.5
 LABEL_GAP = 30
 LABEL_SIZE = 10
 VALUE_SIZE = 25
-ROLLING_PREDICTION_COUNT = 20
+ROLLING_PREDICTION_COUNT = 25
+DEF_BATCH_SIZE = 30
 
 ################
 # Chart Key
@@ -66,7 +67,7 @@ class VIEW():
         OVERLAP: (0,255,0),
         BIAS: (255,255,0),
         PREACTIVATION: (255,180,0),
-        SEGMENT_DETAIL: (0,255,255),
+        SEGMENT_DETAIL: (0,180,255),
         POSTBIAS: (255,255,0),
         PREDICTOR: (0,255,0)
     }
@@ -74,7 +75,7 @@ class VIEW():
     LABEL = {
         ACTIVATION: "Activation",
         OVERLAP: "Overlap",
-        BIAS: "Bias",
+        BIAS: "Prestep Bias",
         PREACTIVATION: "Preactivation",
         POSTBIAS: "Post-Bias",
         PREDICTOR: "Predictor"
@@ -83,6 +84,7 @@ class VIEW():
     MAX_VALUE = {
         BIAS: 3,
         POSTBIAS: 3,
+        PREACTIVATION: 2,
         OVERLAP: 2
     }
 
@@ -105,8 +107,11 @@ class VIEW():
         if index == printer.focus_cell_index:
             ol = "#fff"
         value = region.last_activation[index]
-        activating = region.cells[index].activation == 1.0
-        indicator = "#fff" if activating else None
+        cell = region.cells[index]
+        activating = cell.activation == 1.0
+        indicator = None
+        if activating:
+            indicator = "#fff" if cell.excitatory else "#000"
         return (value, indicator, ol)
 
     @staticmethod
@@ -140,9 +145,9 @@ class VIEW():
         ol = None
         if index == printer.focus_cell_index:
             ol = "#fff"
-        overlap_match = region.last_bias[index] > 0 and region.overlap[index] > 0
+        overlap_match = region.pre_bias[index] > 0 and region.overlap[index] > 0
         indicator = "#fff" if overlap_match else ""
-        return (region.last_bias[index], indicator, ol)
+        return (region.pre_bias[index], indicator, ol)
 
     @staticmethod
     def draw_post_bias(printer, region, index):
@@ -167,8 +172,6 @@ class VIEW():
         perm = 0
         indicator = None
         ol = None
-        if index == printer.focus_cell_index:
-            ol = "#fff"
         segs = []
         if segment_type == 'distal':
             segs = cell.distal_segments
@@ -179,29 +182,33 @@ class VIEW():
             if index in seg.syn_sources:
                 # There is a synapse here
                 syn_index = seg.syn_sources.index(index)
+                source_cell = seg.source_cell(syn_index)
                 perm = seg.syn_permanences[syn_index]
-                change = 0
-                if post_step:
-                    change = seg.syn_change[syn_index]
-                    contribution = seg.syn_contribution[syn_index]
-                else:
-                    contribution = seg.syn_prestep_contribution[syn_index]
-                ol = "#F36B1D" if contribution > 0.5 else ""
+                change = seg.syn_change[syn_index]
+                contribution = seg.syn_contribution[syn_index]
+                if contribution and source_cell:
+                    ol = "#0f0" if source_cell.excitatory else "#f00"
                 if change == 0:
                     indicator = None
                 elif change > 0:
                     indicator = "#fff"
                 elif change < 0:
                     indicator = "#000"
+        if index == printer.focus_cell_index:
+            indicator = "#f00"
         return (perm, indicator, ol)
 
     # GRID OUTLINE METHODS
     # These methods return a color for the full grid's outline
 
     @staticmethod
-    def segment_learning(cell, segment_index=0, post_step=False):
-        if segment_index < len(cell.distal_segments):
-            seg = cell.distal_segments[segment_index]
+    def segment_learning(cell, segment_index=0, post_step=False, segment_type="distal"):
+        seg = None
+        if segment_type == 'distal':
+            seg = cell.distal_segments[segment_index] if segment_index < len(cell.distal_segments) else None
+        elif segment_type == 'proximal':
+            seg = cell.proximal_segments[segment_index] if segment_index < len(cell.proximal_segments) else None
+        if seg:
             learning = any(seg.syn_change)
             active = seg.active_before_learning
             if learning and active:
@@ -255,6 +262,7 @@ class CHTMPrinter(Tk):
     def setup(self):
         self.main_window = MainWindow(self, self.brain, on_focus_cell=self.focus_cell, max_side=self.max_side)
         self.cell_window = CellWindow(self, max_side=self.max_side, cpr=self.brain.CELLS_PER_REGION)
+        self.cell_window.move(x=0, y=0)
 
         self.main_window.move(x=self.cell_window.width, y=0)
         self.geometry('%dx%d+%d+%d' % (200, 150, 0, 400))
@@ -272,28 +280,31 @@ class CHTMPrinter(Tk):
         action_menu.add_command(label="Segment Activation Showing", command=partial(self.toggle_view, 'segment_activation'))
         action_menu.add_command(label="Segment Post Step", command=partial(self.toggle_view, 'segment_post_step'))
         action_menu.add_command(label="Show Predicted Associations", command=partial(self.toggle_view, 'predicted_associations'))
-        action_menu.add_command(label="Show Predicted Associations", command=partial(self.toggle_view, 'predicted_associations'))
         self.menubar.add_cascade(label="File", menu=file_menu)
         self.menubar.add_cascade(label="Action", menu=action_menu)
         self.config(menu=self.menubar)
 
         # Controls
-        Label(self, text="Batch Size").grid(row=0)
+        Label(self, text="Batch Size (def %d)" % DEF_BATCH_SIZE).grid(row=0)
         self.batch_entry = Entry(self)
         self.batch_entry.grid(row=1)
-        b = Button(self, text="Run", command=self.parse_batch_size)
+        b = Button(self, text="Run Batch", command=self.parse_batch_size)
         b.grid(row=2)
-        b = Button(self, text="Quit", command=self.handle_quit)
+        b = Button(self, text="One Step", command=self.one_step)
         b.grid(row=3)
+        b = Button(self, text="Quit", command=self.handle_quit)
+        b.grid(row=4)
 
     def parse_batch_size(self):
         _steps = self.batch_entry.get()
         if not _steps:
-            steps = 1
+            steps = DEF_BATCH_SIZE
         if _steps.isdigit():
             steps = int(_steps)
         self.handle_run_batch(steps)
 
+    def one_step(self):
+        self.handle_run_batch(1)
 
     def startloop(self, delay, fn):
         self.after(delay, fn)
@@ -302,6 +313,7 @@ class CHTMPrinter(Tk):
 
 
     def toggle_view(self, toggle):
+        print("Toggling %s" % toggle)
         if toggle in self.view_toggles:
             self.view_toggles.remove(toggle)
         else:
@@ -326,19 +338,23 @@ class CHTMPrinter(Tk):
             self.focus_cell_index = index
             cell = region.cells[index]
             self.cell_window.wm_title("Cell %d" % index)
-            print("Focusing on %s" % (cell))
+            self.cell_window.region = region
+            print(">> Focusing on %s" % (cell))
+            for seg in cell.distal_segments:
+                print(str(seg))
+                print("Activation - %s of %s threshold" % (seg.total_activation(), seg.threshold()))
             for si, cg in enumerate(self.cell_window.grids):
                 post_step = self.view_active('segment_post_step')
                 if cg.tag == 'distal':
-                    cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=si, post_step=post_step, segment_type=cg.tag)
-                    cg.grid_outline_fn = partial(VIEW.segment_learning, cell, segment_index=si, post_step=post_step)
+                    cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=cg.segment_index, post_step=post_step, segment_type=cg.tag)
+                    cg.grid_outline_fn = partial(VIEW.segment_learning, cell, segment_index=cg.segment_index, post_step=post_step, segment_type=cg.tag)
                 elif cg.tag == 'proximal':
-                    cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=si, post_step=post_step, segment_type=cg.tag)
+                    cg.cell_draw_fn = partial(VIEW.draw_cell_synapses, self, cell, segment_index=cg.segment_index, post_step=post_step, segment_type=cg.tag)
+                    cg.grid_outline_fn = partial(VIEW.segment_learning, cell, segment_index=cg.segment_index, post_step=post_step, segment_type=cg.tag)
                 cg.render()
 
-            if self.predictor_window:
-                for si, cg in enumerate(self.predictor_window.grids):
-                    cg.render()
+            for si, cg in enumerate(self.main_window.grids):
+                cg.render()
 
     def render(self):
         for window in [self.main_window, self.cell_window, self.predictor_window]:
@@ -487,22 +503,23 @@ class CellWindow(CanvasWindow):
         height = VIEWABLE_SEGMENTS * (max_side + REGION_BUFFER) + REGION_BUFFER
         self.set_size(width, height)
 
-        for i in range(VIEWABLE_SEGMENTS):
+        for si in range(VIEWABLE_SEGMENTS):
             draw_fn = None
             grid_outline_fn = None
-            on_cell_click = partial(self.focus_synapse, self.region, i)
+            on_cell_click = partial(self.focus_synapse, si)
             # Proximal seg
-            self.add_grid(CellGrid(REGION_BUFFER, (i * (max_side + REGION_BUFFER)) + REGION_BUFFER, cpr, canvas=self.canvas, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=0.5, on_cell_click=on_cell_click, title="Proximal Seg %d" % (i+1), tag="proximal"))
+            self.add_grid(CellGrid(REGION_BUFFER, (si * (max_side + REGION_BUFFER)) + REGION_BUFFER, cpr, canvas=self.canvas, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=1.0, on_cell_click=on_cell_click, title="Prox. Seg %d" % (si+1), tag="proximal", segment_index=si))
             # Distal seg
-            self.add_grid(CellGrid(2*REGION_BUFFER + max_side, (i * (max_side + REGION_BUFFER)) + REGION_BUFFER, cpr, canvas=self.canvas, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=0.5, on_cell_click=on_cell_click, title="Distal Seg %d" % (i+1), tag="distal"))
+            self.add_grid(CellGrid(2*REGION_BUFFER + max_side, (si * (max_side + REGION_BUFFER)) + REGION_BUFFER, cpr, canvas=self.canvas, view_type=VIEW.SEGMENT_DETAIL, cell_draw_fn=draw_fn, grid_outline_fn=grid_outline_fn, saturate_value=0.2, max_value=1.0, on_cell_click=on_cell_click, title="Dist. Seg %d" % (si+1), tag="distal", segment_index=si))
         self.initialize_grids()
 
-    def focus_synapse(self, region, segment_index, index):
-        if self.printer.focus_cell_index:
-            cell = region.cells[self.printer.focus_cell_index]
+    def focus_synapse(self, segment_index, index):
+        fci = self.printer.focus_cell_index
+        if fci:
+            cell = self.region.cells[fci]
             seg = cell.distal_segments[segment_index]
             perm, contr, last_change = seg.synapse_state(index)
-            print("Synapse focus_cell=%s source_index=%s permanence=%s contribution=%s last_change=%s" % (self.focus_cell_index, index, perm, contr, last_change))
+            print("<Synapse focus_cell=%s source_index=%s permanence=%s contribution=%s last_change=%s>" % (fci, index, perm, contr, last_change))
 
 
 class PredictorWindow(CanvasWindow):
@@ -573,7 +590,7 @@ class CellGrid(object):
     Canvas to draw a view of one region and handle clicks
     '''
 
-    def __init__(self, x, y, n_cells, canvas=None, view_type=None, cell_draw_fn=None, grid_outline_fn=None, on_cell_click=None, max_value=1.0, saturate_value=1.0, title=None, tag=None):
+    def __init__(self, x, y, n_cells, canvas=None, view_type=None, cell_draw_fn=None, grid_outline_fn=None, on_cell_click=None, max_value=1.0, saturate_value=1.0, title=None, tag=None, segment_index=None):
         self.x, self.y = x, y # upper left
         self.n_cells = n_cells
         self.max_value = max_value
@@ -589,6 +606,7 @@ class CellGrid(object):
         self.hl_indicators = []
         self.temporary_widgets = []
         self.title = title
+        self.segment_index = segment_index
         self.hl = None
         self.tag = tag
 

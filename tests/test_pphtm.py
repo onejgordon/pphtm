@@ -1,53 +1,48 @@
 #!/usr/bin/env python
-import sys
+import sys, getopt
 from os import path
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
 from pphtm.pphtm_brain import PPHTMBrain
 from chtm.chtm_printer import CHTMPrinter
 from pphtm.pphtm_predictor import PPHTMPredictor
+from helpers.file_processer import FileProcesser
 import numpy as np
 
 from nupic.encoders.scalar import ScalarEncoder
 from encoders import SimpleFullWidthEncoder
 
 USE_SIMPLE_ENCODER = True
-# FILENAME = "longer_char_sequences1.txt"
 SHOW_RUN_SUMMARY = False
-FILENAME = "simple_pattern2.txt"
 
-class FileProcesser(object):
+class TestRunner(object):
+    '''
+    Runs a single data file through a PPHTM and visualizes processing.
+    '''
 
-    DATA_DIR = "../data"
-    ALPHA = "ABCDEF"
-    CROP_FILE = 300
-    N_INPUTS = 6**2
-
-    def __init__(self, filename=FILENAME, with_classifier=True, delay=50, animate=True):
-        self.b = PPHTMBrain(min_overlap=1, r1_inputs=self.N_INPUTS)
+    def __init__(self, filename=None, with_classifier=True, animate=True, crop=200):
+        self.file_processer = FileProcesser(filename=filename)
+        self.cats, self.data, self.n_inputs = self.file_processer.open_file()
+        self.b = PPHTMBrain(min_overlap=1, r1_inputs=self.n_inputs)
         self.b.initialize()
         self.classifier = None
         self.animate = animate
         self.current_batch_target = 0
         self.current_batch_counter = 0
-        self.delay = delay
+        self.delay = 50
+        self.crop_file = crop
         self.char = None
         self.quitting = False
         if with_classifier:
-            self.classifier = PPHTMPredictor(self.b, categories=self.ALPHA)
+            self.classifier = PPHTMPredictor(self.b, categories=self.cats)
             self.classifier.initialize()
 
         if USE_SIMPLE_ENCODER:
-            self.encoder = SimpleFullWidthEncoder(n_inputs=self.N_INPUTS, n_cats=len(self.ALPHA))
+            self.encoder = SimpleFullWidthEncoder(n_inputs=self.n_inputs, n_cats=len(self.cats))
         else:
-            self.encoder = ScalarEncoder(n=self.N_INPUTS, w=5, minval=1, maxval=self.N_INPUTS, periodic=False, forced=True)
+            self.encoder = ScalarEncoder(n=self.n_inputs, w=5, minval=1, maxval=self.n_inputs, periodic=False, forced=True)
 
         self.printer = CHTMPrinter(self.b, predictor=self.classifier, handle_run_batch=self.start_batch, handle_quit=self.quit)
         self.printer.setup()
-
-        with open(self.DATA_DIR + "/" + filename, 'r') as myfile:
-            self.data = myfile.read()
-
-        self.cursor = 0
 
     def encode_letter(self, c):
         i = ord(c.upper()) - 65 # A == 0
@@ -59,7 +54,7 @@ class FileProcesser(object):
     def start_batch(self, steps=10):
         if steps == 0:
             print("Running to end")
-            self.current_batch_target = self.CROP_FILE - self.cursor
+            self.current_batch_target = self.crop_file - self.file_processer.cursor
         else:
             print("Running %d step(s)" % steps)
             self.current_batch_target = steps
@@ -67,17 +62,16 @@ class FileProcesser(object):
         self.process()
 
     def process(self):
-        finished = self.cursor >= self.CROP_FILE
+        finished = self.file_processer.cursor >= self.crop_file
         if finished:
             self.do_prediction()
         else:
             in_batch = self.current_batch_counter < self.current_batch_target
             if in_batch:
                 # Process one step
-                self.cursor += 1
                 self.current_batch_counter += 1
                 prior_char = self.char
-                self.char = self.data[self.cursor].upper()
+                self.char = self.file_processer.read_next()
                 inputs = self.encode_letter(self.char)
                 self.printer.set_raw_input(self.char)
                 self.b.process(inputs, learning=True)
@@ -101,6 +95,7 @@ class FileProcesser(object):
         print("Quitting...")
         self.printer.destroy()
 
+
     def do_prediction(self):
         if self.classifier:
             done = False
@@ -120,9 +115,29 @@ class FileProcesser(object):
 
         self.printer.destroy()
 
-def main():
-    processor = FileProcesser(delay=10, animate=True, with_classifier=True)
+
+def main(argv):
+    HELP = 'test_pphtm.py -c <crop> -f <file>'
+    try:
+        opts, args = getopt.getopt(argv,"hi:c:",["iterations=","crop="])
+    except getopt.GetoptError:
+        print HELP
+        sys.exit(2)
+    # Defaults
+    kwargs = {
+        'crop': 400,
+        'filename': "longer_char_sequences1.txt" # "simple_pattern2.txt"
+    }
+    for opt, arg in opts:
+        if opt == '-h':
+            print HELP
+            sys.exit()
+        elif opt in ("-c", "--crop"):
+            kwargs['crop'] = int(arg)
+        elif opt in ("-f", "--file"):
+            kwargs['filename'] = arg
+    processor = TestRunner(animate=True, with_classifier=True, **kwargs)
     processor.run()
 
 if __name__ == "__main__":
-    main()
+   main(sys.argv[1:])

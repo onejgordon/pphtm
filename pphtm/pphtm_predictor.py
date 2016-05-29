@@ -36,7 +36,8 @@ class PPHTMPredictor(object):
         '''
         scores = {}
         for raw_input, overlap in self.overlap_lookup.items():
-            score = util.bool_overlap(overlap, self.region.bias) / sum(overlap)
+            # score = util.bool_overlap(overlap, self.region.bias) / sum(overlap)
+            score = np.dot(overlap, self.region.bias) / sum(overlap)
             scores[raw_input] = score
 
         max_raw_input, max_score = max(scores.iteritems(), key=operator.itemgetter(1))

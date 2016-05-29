@@ -1,15 +1,37 @@
 # TODO
 
+## Next experiments
+
+* Proximal synapses unlearning, but not rendering?
+* Fix learning rules!! contributing synapses not increasing
+* Unlearn distal synapses after unfulfilled prediction
+* Decrease fade rate to enable multi-step proximal learning
+* Experiment with integration function (allow distal activation?)
+
 ## Implementation TODO
 
+* Topdown: 2X is learned to precede A, B', C'
+* Distal: A is learned to precede B' (75% of time), and B (25% of the time)
+* Proximal: 2X learns AB'C' via slowness?
+* Why isn't distal prediction working? 2 synapses activating, but no bias
+* Implement unboost for cells active (e.g. from bias) too frequently?
+	- Unboost -> increase inhibitory synapse permanences
+* Proximal cell detail connection grid not sized properly
 * How do we form invariant structures?
-* Drastic fluctuation in number of cells active (kth_score logic issue?)
+	- Do higher regions learn multi-step sub-patterns after biases turn on? AB'C' -> 2
+* Consider differences required by 1R proximal dynamic and 2R.
+	- 1R needs to learn 1 SDR per input
+	- 2R needs to learn multi-step combinations of inputs?
+	- Do we need to enable distal connections (bias) to activate even in absence of ff?
+	- Or is activation slowness sufficient?
 * Linear regression on swarm runs to show stat. sig. of any relationships
-* Printing proximal connections
 * Redo printer with custom Widgets()
 
 ## Algorithm TODO
 
+* How do inhibitory neurons learn?
+	- Learning can occur due to post-synaptic activity only.
+	- If post-synapse active too frequently, synapse from inh. cell strengthens?
 * Prediction may be undermined by topdown. Consider relative bias strength in prediction matching?
 * Does formation of invariant structures require lower-level slowness?
 	- E.g. AB'C retains enough of AB' to fire higher level SDR representing AB'C
@@ -28,15 +50,7 @@
 	- when a predicted incoming signal is passed upwards, no change occurs...
 
 
-## Eventual
-
-* Render proximal connections (and re-initialize changes there too)
-* Now it's time to build invariant SDRs at a higher region layer.
-* These can predict all pattern members regardless of order.
-
 ## Current Problems
-
-* Once a region has learned, bias should be a subset of proximal overlap on each step
 
 * All segments are learning same patterns? How to choose which to learn?
 * A->B, since it's less frequent, is unable to learn this transition (we

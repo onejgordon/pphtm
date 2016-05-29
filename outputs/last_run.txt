@@ -1,2 +1,0 @@
-Run Result (0) % correct: 47.1, % correct end: 33.3BOOST_MULTIPLIER -> 1.84048785258
-Run Result (1) % correct: 50.7, % correct end: 71.4 <<< GOODBOOST_MULTIPLIER -> 1.70632148634
