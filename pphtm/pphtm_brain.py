@@ -64,7 +64,7 @@ class Segment(object):
                 input_x, input_y = util.coords_from_index(source, self.region._input_side_len())
                 dist = util.distance((cell_x, cell_y), (input_x, input_y))
                 max_distance = self.region.diagonal
-                chance_of_synapse = ((self.region.brain.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE - self.region.brain.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE) * (1 - float(dist)/max_distance)) + self.region.brain.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE
+                chance_of_synapse = ((self.region.brain.config("MAX_PROXIMAL_INIT_SYNAPSE_CHANCE") - self.region.brain.config("MIN_PROXIMAL_INIT_SYNAPSE_CHANCE")) * (1 - float(dist)/max_distance)) + self.region.brain.config("MIN_PROXIMAL_INIT_SYNAPSE_CHANCE")
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(source)
@@ -74,14 +74,14 @@ class Segment(object):
                 if index == cell_index:
                     # Avoid creating synapse with self
                     continue
-                chance_of_synapse = self.region.brain.DISTAL_SYNAPSE_CHANCE
+                chance_of_synapse = self.region.brain.config("DISTAL_SYNAPSE_CHANCE")
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(index)
         else:
             # Top down connections
             for index in range(self.region.n_cells_above):
-                chance_of_synapse = self.region.brain.TOPDOWN_SYNAPSE_CHANCE
+                chance_of_synapse = self.region.brain.config("TOPDOWN_SYNAPSE_CHANCE")
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(index)
@@ -144,9 +144,11 @@ class Segment(object):
     def decay_permanences(self):
         '''Reduce connected permanences by a small decay factor.
         '''
-        factor = self.region.brain.SYNAPSE_DECAY
+        prox_decay = self.region.brain.config("SYNAPSE_DECAY_PROX")
+        distal_decay = self.region.brain.config("SYNAPSE_DECAY_DIST")
+        decay = prox_decay if self.proximal() else distal_decay
         for syn in self.connected_synapses():
-            self.syn_permanences[syn] -= factor
+            self.syn_permanences[syn] -= decay
 
     def distance_from(self, coords_xy, index=0):
         source_xy = util.coords_from_index(self.syn_sources[index], self.region._input_side_len())
@@ -207,7 +209,7 @@ class Segment(object):
                 return 0.0
 
     def threshold(self):
-        threshold = self.region.brain.PROXIMAL_ACTIVATION_THRESHHOLD if self.proximal() else self.region.brain.DISTAL_ACTIVATION_THRESHOLD
+        threshold = self.region.brain.config("PROXIMAL_ACTIVATION_THRESHHOLD") if self.proximal() else self.region.brain.config("DISTAL_ACTIVATION_THRESHOLD")
         return threshold
 
     def active(self):
@@ -239,16 +241,16 @@ class Cell(object):
     def __init__(self, region, index):
         self.index = index
         self.region = region
-        self.n_proximal_segments = self.region.brain.PROX_SEGMENTS
-        self.n_distal_segments = self.region.brain.DISTAL_SEGMENTS
-        self.n_topdown_segments = self.region.brain.TOPDOWN_SEGMENTS if not self.region.is_top() else 0
+        self.n_proximal_segments = self.region.brain.config("PROX_SEGMENTS")
+        self.n_distal_segments = self.region.brain.config("DISTAL_SEGMENTS")
+        self.n_topdown_segments = self.region.brain.config("TOPDOWN_SEGMENTS") if not self.region.is_top() else 0
         self.distal_segments = []
         self.proximal_segments = []
         self.topdown_segments = []
         self.activation = 0.0 # [0.0, 1.0]
         self.coords = util.coords_from_index(index, self.region._cell_side_len())
-        self.fade_rate = self.region.brain.FADE_RATE
-        self.excitatory = random.random() > self.region.brain.CHANCE_OF_INHIBITORY
+        self.fade_rate = self.region.brain.config("FADE_RATE")
+        self.excitatory = random.random() > self.region.brain.config("CHANCE_OF_INHIBITORY")
 
         # History
         self.recent_active_duty = []  # After inhibition, list of bool
@@ -349,8 +351,6 @@ class Region(object):
         self.brain = brain
 
         # Region constants (spatial)
-        self.permanence_inc = self.brain.PERM_LEARN_INC
-        self.permanence_dec = self.brain.PERM_LEARN_DEC
         self.inhibition_radius = 0
 
         # Hierarchichal setup
@@ -461,7 +461,7 @@ class Region(object):
         if self.active_duty_cycle[c] >= min_duty_cycle:
             b = 1.0
         else:
-            b = 1 + (min_duty_cycle - self.active_duty_cycle[c]) * self.brain.BOOST_MULTIPLIER
+            b = 1 + (min_duty_cycle - self.active_duty_cycle[c]) * self.brain.config("BOOST_MULTIPLIER")
         return b
 
     def _increase_cell_permanences(self, c, increase, excitatory=True, type="proximal"):
@@ -513,7 +513,7 @@ class Region(object):
         for i, c in enumerate(self.cells):
             for seg in (c.distal_segments + c.topdown_segments):
                 seg.active_before_learning = seg.active()
-                increment = 1 if seg.distal() else self.brain.TOPDOWN_BIAS_WEIGHT
+                increment = 1 if seg.distal() else self.brain.config("TOPDOWN_BIAS_WEIGHT")
                 if seg.active_before_learning:
                     bias[i] += increment
         return bias
@@ -542,13 +542,13 @@ class Region(object):
 
         TODO: Try modulating weighting based on recent distal/topdown vs proximal activity
         '''
-        self.pre_activation = (self.brain.OVERLAP_WEIGHT * self.overlap) * (1 + (self.brain.BIAS_WEIGHT * self.bias))
-        # self.pre_activation = (self.brain.OVERLAP_WEIGHT * self.overlap) + (self.brain.BIAS_WEIGHT * self.bias)
+        self.pre_activation = (self.brain.config("OVERLAP_WEIGHT") * self.overlap) * (1 + (self.brain.config("BIAS_WEIGHT") * self.bias))
+        # self.pre_activation = (self.brain.config("OVERLAP_WEIGHT") * self.overlap) + (self.brain.config("BIAS_WEIGHT") * self.bias)
         active = np.zeros(len(self.cells))
         for c in self.cells:
             pa = self.pre_activation[c.index]
             neighbors = self._neighbors_of(c)
-            kth_score = self._kth_score(neighbors, self.pre_activation, k=self.brain.DESIRED_LOCAL_ACTIVITY)
+            kth_score = self._kth_score(neighbors, self.pre_activation, k=self.brain.config("DESIRED_LOCAL_ACTIVITY"))
             if pa > 0 and pa >= kth_score:
                 active[c.index] = True
         return active
@@ -564,6 +564,7 @@ class Region(object):
             a) it is contributing from an excitatory source, and
             b) cell is not activating, but is biased
 
+        TODO: Move all learning logic here for clarity?
         '''
         n_inc = n_dec = n_conn = n_discon = 0
         active = seg.active_before_learning
@@ -573,22 +574,29 @@ class Region(object):
             source_cell = seg.source_cell(i)
             source_excitatory = not source_cell or source_cell.excitatory # Inputs excitatory
             contribution = seg.contribution(i, absolute=True)
-            learn_threshold = self.brain.DIST_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD if (seg.distal() or seg.topdown()) else self.brain.PROX_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD
+            learn_threshold = self.brain.config("DIST_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD") if (seg.distal() or seg.topdown()) else self.brain.config("PROX_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD")
             contributor = contribution >= learn_threshold
             seg.syn_contribution[i] = contributor
             increase_permanence = decrease_permanence = False
-            change_permanence = contributor and source_excitatory
+            if seg.proximal():
+                change_permanence = seg.active_before_learning and is_activating and source_excitatory
+            else:
+                change_permanence = contributor and source_excitatory
             if change_permanence:
-                increase_permanence = is_activating
-                decrease_permanence = not is_activating and is_biased
+                if seg.proximal():
+                    increase_permanence = contributor
+                    decrease_permanence = False # (just decay) not contributor
+                else:
+                    increase_permanence = is_activating
+                    decrease_permanence = not is_activating and is_biased
                 if increase_permanence and seg.syn_permanences[i] < 1.0:
                     n_inc += 1
-                    seg.syn_permanences[i] += self.permanence_inc
+                    seg.syn_permanences[i] += self.brain.config("PERM_LEARN_INC")
                     seg.syn_permanences[i] = min(1.0, seg.syn_permanences[i])
                     seg.syn_change[i] += 1
                 elif decrease_permanence and seg.syn_permanences[i] > 0.0:
                     n_dec +=1
-                    seg.syn_permanences[i] -= self.permanence_dec
+                    seg.syn_permanences[i] -= self.brain.config("PERM_LEARN_DEC")
                     seg.syn_permanences[i] = max(0.0, seg.syn_permanences[i])
                     seg.syn_change[i] -= 1
                 connection_changed = was_connected != seg.connected(i)
@@ -655,8 +663,8 @@ class Region(object):
             cell.update_duty_cycles(active=cell_active, overlap=sufficient_overlap, bias=biased)
             boost_inhibitory = self.bias_duty_cycle[i] > LIMIT_BIAS_DUTY_CYCLE
             if boost_inhibitory:
-                self._increase_cell_permanences(i, self.brain.DISTAL_BOOST_MULT * CONNECTED_PERM, type="distal", excitatory=False)
-                self._increase_cell_permanences(i, self.brain.DISTAL_BOOST_MULT * CONNECTED_PERM, type="topdown", excitatory=False)
+                self._increase_cell_permanences(i, self.brain.config("DISTAL_BOOST_MULT") * CONNECTED_PERM, type="distal", excitatory=False)
+                self._increase_cell_permanences(i, self.brain.config("DISTAL_BOOST_MULT") * CONNECTED_PERM, type="topdown", excitatory=False)
             if T_START_PROXIMAL_BOOSTING != -1 and self.brain.t > T_START_PROXIMAL_BOOSTING:
                 self.boost[i] = self._boost_function(i, min_duty_cycle)  # Updates boost value for cell (higher if below min)
 
@@ -669,8 +677,8 @@ class Region(object):
             if T_START_DISTAL_BOOSTING != -1 and self.brain.t > T_START_DISTAL_BOOSTING:
                 if self.bias_duty_cycle[i] < min_duty_cycle:
                     # TODO: Confirm this is working
-                    self._increase_cell_permanences(i, self.brain.DISTAL_BOOST_MULT * CONNECTED_PERM, type="distal")
-                    self._increase_cell_permanences(i, self.brain.DISTAL_BOOST_MULT * CONNECTED_PERM, type="topdown")
+                    self._increase_cell_permanences(i, self.brain.config("DISTAL_BOOST_MULT") * CONNECTED_PERM, type="distal")
+                    self._increase_cell_permanences(i, self.brain.config("DISTAL_BOOST_MULT") * CONNECTED_PERM, type="topdown")
                     n_boosted += 1
             all_field_sizes.append(self.cells[i].connected_receptive_field_size())
 
@@ -678,7 +686,7 @@ class Region(object):
             log("Boosting %d due to low overlap duty cycle" % n_boosted)
 
         # Update inhibition radius (based on updated active connections in each column)
-        self.inhibition_radius = util.average(all_field_sizes) * self.brain.INHIBITION_RADIUS_DISCOUNT
+        self.inhibition_radius = util.average(all_field_sizes) * self.brain.config("INHIBITION_RADIUS_DISCOUNT")
         min_positive_radius = 1.0
         if self.inhibition_radius and self.inhibition_radius < min_positive_radius:
             self.inhibition_radius = min_positive_radius
@@ -781,86 +789,44 @@ class PPHTMBrain(object):
         self.n_inputs = r1_inputs
         self.min_overlap = min_overlap # A minimum number of inputs that must be active for a column to be considered during the inhibition step
         # Defaults
-        self.PROXIMAL_ACTIVATION_THRESHHOLD = 3 # Activation threshold for a segment. If the number of active connected synapses in a segment is greater than activationThreshold, the segment is said to be active.
-        self.DISTAL_ACTIVATION_THRESHOLD = 2
-        self.BOOST_MULTIPLIER = 2.58
-        self.DESIRED_LOCAL_ACTIVITY = 2
-        self.DISTAL_SYNAPSE_CHANCE = 0.3
-        self.TOPDOWN_SYNAPSE_CHANCE = 0.3
-        self.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.4
-        self.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = 0.1
-        self.CELLS_PER_REGION = 8**2
-        self.N_REGIONS = 2
-        self.BIAS_WEIGHT = 0.6
-        self.OVERLAP_WEIGHT = 0.4
-        self.FADE_RATE = 0.5 # 0.5
-        self.DISTAL_SEGMENTS = 3
-        self.PROX_SEGMENTS = 2
-        self.TOPDOWN_SEGMENTS = 1 # Only relevant if >1 region
-        self.TOPDOWN_BIAS_WEIGHT = 0.5
-        self.SYNAPSE_DECAY = 0.0 #0.0004
-        self.PERM_LEARN_INC = 0.06
-        self.PERM_LEARN_DEC = 0.03
-        self.CHANCE_OF_INHIBITORY = 0.1
-        self.DIST_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD = 1.0
-        self.PROX_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD = 0.5
-        self.DISTAL_BOOST_MULT = 0.01
-        self.INHIBITION_RADIUS_DISCOUNT = 0.8
+        self.CONFIG = {
+            "PROXIMAL_ACTIVATION_THRESHHOLD": 3,
+            "DISTAL_ACTIVATION_THRESHOLD": 2,
+            "BOOST_MULTIPLIER": 2.58,
+            "DESIRED_LOCAL_ACTIVITY": 2,
+            "DISTAL_SYNAPSE_CHANCE": 0.4,
+            "TOPDOWN_SYNAPSE_CHANCE": 0.3,
+            "MAX_PROXIMAL_INIT_SYNAPSE_CHANCE": 0.4,
+            "MIN_PROXIMAL_INIT_SYNAPSE_CHANCE": 0.1,
+            "CELLS_PER_REGION": 14**2,
+            "N_REGIONS": 2,
+            "BIAS_WEIGHT": 0.6,
+            "OVERLAP_WEIGHT": 0.4,
+            "FADE_RATE": 0.5,
+            "DISTAL_SEGMENTS": 3,
+            "PROX_SEGMENTS": 2,
+            "TOPDOWN_SEGMENTS": 1,
+            "TOPDOWN_BIAS_WEIGHT": 0.5,
+            "SYNAPSE_DECAY_PROX": 0.00005,
+            "SYNAPSE_DECAY_DIST": 0.0,
+            "PERM_LEARN_INC": 0.07,
+            "PERM_LEARN_DEC": 0.04,
+            "CHANCE_OF_INHIBITORY": 0.1,
+            "DIST_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD": 1.0,
+            "PROX_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD": 0.5,
+            "DISTAL_BOOST_MULT": 0.01,
+            "INHIBITION_RADIUS_DISCOUNT": 0.8
+        }
+
 
     def __repr__(self):
         return "<PPHTMBrain regions=%d>" % len(self.regions)
 
+    def config(self, key):
+        return self.CONFIG.get(key)
+
     def initialize(self, n_inputs=None, **params):
-        if 'PROXIMAL_ACTIVATION_THRESHHOLD' in params:
-            self.PROXIMAL_ACTIVATION_THRESHHOLD = params.get('PROXIMAL_ACTIVATION_THRESHHOLD')
-        if 'DISTAL_ACTIVATION_THRESHOLD' in params:
-            self.DISTAL_ACTIVATION_THRESHOLD = params.get('DISTAL_ACTIVATION_THRESHOLD')
-        if 'BOOST_MULTIPLIER' in params:
-            self.BOOST_MULTIPLIER = params.get('BOOST_MULTIPLIER')
-        if 'DESIRED_LOCAL_ACTIVITY' in params:
-            self.DESIRED_LOCAL_ACTIVITY = params.get('DESIRED_LOCAL_ACTIVITY')
-        if 'DISTAL_SYNAPSE_CHANCE' in params:
-            self.DISTAL_SYNAPSE_CHANCE = params.get('DISTAL_SYNAPSE_CHANCE')
-        if 'TOPDOWN_SYNAPSE_CHANCE' in params:
-            self.TOPDOWN_SYNAPSE_CHANCE = params.get('TOPDOWN_SYNAPSE_CHANCE')
-        if 'MAX_PROXIMAL_INIT_SYNAPSE_CHANCE' in params:
-            self.MAX_PROXIMAL_INIT_SYNAPSE_CHANCE = params.get('MAX_PROXIMAL_INIT_SYNAPSE_CHANCE')
-        if 'MIN_PROXIMAL_INIT_SYNAPSE_CHANCE' in params:
-            self.MIN_PROXIMAL_INIT_SYNAPSE_CHANCE = params.get('MIN_PROXIMAL_INIT_SYNAPSE_CHANCE')
-        if 'CELLS_PER_REGION' in params:
-            self.CELLS_PER_REGION = params.get('CELLS_PER_REGION')
-        if 'N_REGIONS' in params:
-            self.N_REGIONS = params.get('N_REGIONS')
-        if 'BIAS_WEIGHT' in params:
-    	   self.BIAS_WEIGHT = params.get('BIAS_WEIGHT')
-        if 'OVERLAP_WEIGHT' in params:
-    	   self.OVERLAP_WEIGHT = params.get('OVERLAP_WEIGHT')
-        if 'FADE_RATE' in params:
-    	   self.FADE_RATE = params.get('FADE_RATE')
-        if 'DISTAL_SEGMENTS' in params:
-    	   self.DISTAL_SEGMENTS = params.get('DISTAL_SEGMENTS')
-        if 'PROX_SEGMENTS' in params:
-    	   self.PROX_SEGMENTS = params.get('PROX_SEGMENTS')
-        if 'TOPDOWN_SEGMENTS' in params:
-            self.TOPDOWN_SEGMENTS = params.get('TOPDOWN_SEGMENTS')
-        if 'SYNAPSE_DECAY' in params:
-        	self.SYNAPSE_DECAY = params.get('SYNAPSE_DECAY')
-        if 'PERM_LEARN_INC' in params:
-        	self.PERM_LEARN_INC = params.get('PERM_LEARN_INC')
-        if 'PERM_LEARN_DEC' in params:
-        	self.PERM_LEARN_DEC = params.get('PERM_LEARN_DEC')
-        if 'CHANCE_OF_INHIBITORY' in params:
-            self.CHANCE_OF_INHIBITORY = params.get('CHANCE_OF_INHIBITORY')
-        if 'DIST_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD' in params:
-            self.DIST_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD = params.get('DIST_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD')
-        if 'PROX_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD' in params:
-            self.PROX_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD = params.get('PROX_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD')
-        if 'DISTAL_BOOST_MULT' in params:
-            self.DISTAL_BOOST_MULT = params.get('DISTAL_BOOST_MULT')
-        if 'INHIBITION_RADIUS_DISCOUNT' in params:
-            self.INHIBITION_RADIUS_DISCOUNT = params.get('INHIBITION_RADIUS_DISCOUNT')
-        if 'TOPDOWN_BIAS_WEIGHT' in params:
-            self.TOPDOWN_BIAS_WEIGHT = params.get('TOPDOWN_BIAS_WEIGHT')
+        self.CONFIG.update(params)
 
         if n_inputs is not None:
             self.n_inputs = n_inputs
@@ -869,9 +835,9 @@ class PPHTMBrain(object):
 
         # Initialize and create regions and cells
         self.regions = []
-        for i in range(self.N_REGIONS):
-            top_region = i == self.N_REGIONS - 1
-            cpr = self.CELLS_PER_REGION
+        for i in range(self.config("N_REGIONS")):
+            top_region = i == self.config("N_REGIONS") - 1
+            cpr = self.config("CELLS_PER_REGION")
             r = Region(self, i, n_inputs=n_inputs, n_cells=cpr, n_cells_above=cpr if not top_region else 0)
             r.initialize()
             n_inputs = cpr  # Next region will have 1 input for each output cell

@@ -2,14 +2,15 @@
 
 ## Next experiments
 
-* Proximal synapses unlearning, but not rendering?
-* Fix learning rules!! contributing synapses not increasing
-* Unlearn distal synapses after unfulfilled prediction
+* Are we unlearning patterns too quickly for segments? Should we fade slower?
+* See invariant structures in R2 (maintaining activation during sequence, prximal learning rules)
+* Proximal synapses never unlearning (what's the rule? check htm)
 * Decrease fade rate to enable multi-step proximal learning
 * Experiment with integration function (allow distal activation?)
 
 ## Implementation TODO
 
+* Export swarm results to CV for easier analysis
 * Topdown: 2X is learned to precede A, B', C'
 * Distal: A is learned to precede B' (75% of time), and B (25% of the time)
 * Proximal: 2X learns AB'C' via slowness?

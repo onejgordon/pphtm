@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import sys
+
 class FileProcesser(object):
     '''
     Helper for loading data files for processing
