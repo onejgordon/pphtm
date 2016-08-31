@@ -3,8 +3,8 @@
 import numpy as np
 import random
 import math
-import util
-from util import printarray
+from pphtm import util
+from pphtm.util import printarray
 
 # Settings (global vars, other vars set in brain.__init__)
 
@@ -779,11 +779,12 @@ class PPHTMBrain(object):
     Predictive Processing implementation of HTM.
     '''
 
-    def __init__(self, min_overlap=DEF_MIN_OVERLAP, r1_inputs=1):
+    def __init__(self, min_overlap=DEF_MIN_OVERLAP, r1_inputs=1, seed=None):
         self.regions = []
         self.t = 0
         self.active_behaviors = []
         self.inputs = None
+        self.seed = seed
 
         # Brain config
         self.n_inputs = r1_inputs
@@ -831,6 +832,9 @@ class PPHTMBrain(object):
         if n_inputs is not None:
             self.n_inputs = n_inputs
 
+        if self.seed is not None:
+            random.seed(self.seed)
+
         n_inputs = self.n_inputs
 
         # Initialize and create regions and cells
@@ -844,6 +848,26 @@ class PPHTMBrain(object):
             self.regions.append(r)
         self.t = 0
         log("Initialized %s" % self)
+
+    def get_anomaly_score(self):
+        # should we be using standard bias?
+        r0 = self.regions[0]
+        biasedCells = r0.pre_bias > 0
+        overlappedCells = r0.overlap > 0
+        nBiasedCells = np.sum(biasedCells)
+        nPredictedCells = np.sum(overlappedCells & biasedCells)
+        matchScore = nPredictedCells / float(nBiasedCells) if nBiasedCells > 0 else 0.0
+        anomalyScore = 1. - matchScore
+        if anomalyScore < 0.0 or anomalyScore > 1.0:
+            print biasedCells
+            print overlappedCells
+            print nBiasedCells
+            print nPredictedCells
+            print matchScore
+            print anomalyScore
+            raise Exception("anomalyScore out of range: %s" % anomalyScore)
+        return (anomalyScore, nBiasedCells, nPredictedCells)
+
 
     def process(self, readings, learning=False):
         '''

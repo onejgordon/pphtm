@@ -1,15 +1,14 @@
 #!/usr/bin/env python
 import sys, getopt
 from os import path
-sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
-from pphtm.pphtm_brain import PPHTMBrain
-from chtm.chtm_printer import CHTMPrinter
-from pphtm.pphtm_predictor import PPHTMPredictor
-from helpers.file_processer import FileProcesser
+from pphtm.pphtm.pphtm_brain import PPHTMBrain
+from pphtm.chtm.chtm_printer import CHTMPrinter
+from pphtm.pphtm.pphtm_predictor import PPHTMPredictor
+from pphtm.helpers.file_processer import FileProcesser
 import numpy as np
 
 from nupic.encoders.scalar import ScalarEncoder
-from encoders import SimpleFullWidthEncoder
+from pphtm.encoders import SimpleFullWidthEncoder
 
 USE_SIMPLE_ENCODER = True
 SHOW_RUN_SUMMARY = False

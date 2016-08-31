@@ -2,15 +2,14 @@
 import sys, getopt
 from os import path
 sys.path.append( path.dirname( path.dirname( path.abspath(__file__) ) ) )
-from pphtm.pphtm_brain import PPHTMBrain
-from pphtm.pphtm_predictor import PPHTMPredictor
-from datetime import datetime
 import numpy as np
-import util
 import random
-from encoders import SimpleFullWidthEncoder
-from helpers.file_processer import FileProcesser
-import numpy as np
+from pphtm.pphtm.pphtm_brain import PPHTMBrain
+from pphtm.pphtm.pphtm_predictor import PPHTMPredictor
+from datetime import datetime
+import pphtm.util
+from pphtm.encoders import SimpleFullWidthEncoder
+from pphtm.helpers.file_processer import FileProcesser
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 from matplotlib import cm

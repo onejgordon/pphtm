@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 
 import math
-import util
+from pphtm import util
 import numpy as np
 import operator
 
 CONSIDERATION_THRESHOLD = 0.5
-from encoders import SimpleFullWidthEncoder
+from pphtm.encoders import SimpleFullWidthEncoder
 
 class PPHTMPredictor(object):
     '''

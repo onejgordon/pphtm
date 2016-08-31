@@ -4,7 +4,7 @@ from __future__ import print_function
 
 from Tkinter import *
 import math
-import util
+from pphtm import util
 from functools import partial
 import numpy as np
 import matplotlib.pyplot as plt
