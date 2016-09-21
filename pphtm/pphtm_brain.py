@@ -35,7 +35,7 @@ class Segment(object):
     TOPDOWN = 3 # prediction
 
     def __init__(self, cell, index, region, type=None):
-        self.index = index
+        self.index = index # Segment index
         self.region = region
         self.cell = cell
         self.type = type if type else self.PROXIMAL
@@ -743,12 +743,13 @@ class Region(object):
             n_connected = 0
             n_synapses = 0
             for cell in self.cells:
-                for seg in cell.distal_segments:
+                for seg in cell.proximal_segments:
                     permanences.append(util.average(seg.syn_permanences))
                     n_synapses += seg.n_synapses()
                     n_connected += len(filter(lambda x : x > CONNECTED_PERM, seg.syn_permanences))
             ave_permanence = util.average(permanences)
-            log("R%d - average distal synapse permanence: %.1f (%.1f%% connected of %d)" % (self.index, ave_permanence, (n_connected/float(n_synapses))*100., n_synapses), level=1)
+            p_connected = (n_connected/float(n_synapses))*100. if n_synapses else 0.0
+            log("R%d - average proximal synapse permanence: %.1f (%.1f%% connected of %d)" % (self.index, ave_permanence, p_connected, n_synapses), level=1)
 
 
 
@@ -771,7 +772,6 @@ class Region(object):
         self.tempero_spatial_pooling(learning_enabled=learning_enabled)  # Calculates active cells
 
         return [c.activation for c in self.cells]
-
 
 
 class PPHTMBrain(object):
