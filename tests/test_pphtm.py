@@ -5,7 +5,6 @@ from pphtm.pphtm.pphtm_brain import PPHTMBrain
 from pphtm.chtm.chtm_printer import CHTMPrinter
 from pphtm.pphtm.pphtm_predictor import PPHTMPredictor
 from pphtm.helpers.file_processer import FileProcesser
-import numpy as np
 
 from nupic.encoders.scalar import ScalarEncoder
 from pphtm.encoders import SimpleFullWidthEncoder
@@ -13,16 +12,17 @@ from pphtm.encoders import SimpleFullWidthEncoder
 USE_SIMPLE_ENCODER = True
 SHOW_RUN_SUMMARY = False
 
+
 class TestRunner(object):
     '''
     Runs a single data file through a PPHTM and visualizes processing.
     '''
 
-    def __init__(self, filename=None, with_classifier=True, animate=True, crop=200):
+    def __init__(self, filename=None, with_classifier=True, animate=True, crop=200, config={}):
         self.file_processer = FileProcesser(filename=filename)
         self.cats, self.data, self.n_inputs = self.file_processer.open_file()
         self.b = PPHTMBrain(min_overlap=1, r1_inputs=self.n_inputs)
-        self.b.initialize()
+        self.b.initialize(**config)
         self.classifier = None
         self.animate = animate
         self.current_batch_target = 0
