@@ -29,23 +29,34 @@ class Segment(object):
     '''
     Dendrite segment of cell (proximal, distal, or top-down prediction)
     Store all synapses activations / connectedness in arrays
+
+    Exploring a theory where timing of inputs and delay in predicted outputs
+    is modulated by speed of action potential through axon and distance
+    travelled, as well as distance from source of ap on postsynaptic dendrite
+    segment to cell body. Latter distance may be modulated by synapses moving
+    toward or away from cell body, which also enables different coincidence
+    detectors to form.
+
+    Questions: how to move synapse distance, learning rule? Based on delay, or
+    current activation when segment activates?
     '''
     PROXIMAL = 1
     DISTAL = 2
-    TOPDOWN = 3 # prediction
+    TOPDOWN = 3  # prediction
 
     def __init__(self, cell, index, region, type=None):
-        self.index = index # Segment index
+        self.index = index  # Segment index
         self.region = region
         self.cell = cell
         self.type = type if type else self.PROXIMAL
 
         # Synapses (all lists below len == # of synapses)
-        self.syn_sources = [] # Index of source (either input or cell in region, or above)
-        self.syn_permanences = [] # (0,1)
-        self.syn_change = [] # -1, 0 1 (after step)
-        self.syn_prestep_contribution = [] # (after step)
-        self.syn_contribution = [] # (after step)
+        self.syn_sources = []  # Index of source (either input or cell in region, or above)
+        self.syn_permanences = []  # (0,1)
+        self.syn_distances = []  # (0,1) Distance from cell body
+        self.syn_change = []  # -1, 0 1 (after step)
+        self.syn_prestep_contribution = []  # (after step)
+        self.syn_contribution = []  # (after step)
 
         # State
         self.active_before_learning = False
@@ -777,6 +788,7 @@ class Region(object):
 class PPHTMBrain(object):
     '''
     Predictive Processing implementation of HTM.
+    With added continuous timing strategy.
     '''
 
     def __init__(self, min_overlap=DEF_MIN_OVERLAP, r1_inputs=1, seed=None):
