@@ -1,12 +1,11 @@
 #!/usr/bin/env python
+
 import sys, getopt
-from os import path
+import os
 from pphtm.pphtm.pphtm_brain import PPHTMBrain
 from pphtm.chtm.chtm_printer import CHTMPrinter
 from pphtm.pphtm.pphtm_predictor import PPHTMPredictor
 from pphtm.helpers.file_processer import FileProcesser
-
-from nupic.encoders.scalar import ScalarEncoder
 from pphtm.encoders import SimpleFullWidthEncoder
 
 USE_SIMPLE_ENCODER = True
@@ -38,6 +37,7 @@ class TestRunner(object):
         if USE_SIMPLE_ENCODER:
             self.encoder = SimpleFullWidthEncoder(n_inputs=self.n_inputs, n_cats=len(self.cats))
         else:
+            from nupic.encoders.scalar import ScalarEncoder
             self.encoder = ScalarEncoder(n=self.n_inputs, w=5, minval=1, maxval=self.n_inputs, periodic=False, forced=True)
 
         self.printer = CHTMPrinter(self.b, predictor=self.classifier, handle_run_batch=self.start_batch, handle_quit=self.quit)
@@ -73,7 +73,7 @@ class TestRunner(object):
                 self.char = self.file_processer.read_next()
                 inputs = self.encode_letter(self.char)
                 self.printer.set_raw_input(self.char)
-                self.b.process(inputs, learning=True)
+                self.b.step(inputs, learning=True)
                 if self.classifier:
                     self.classifier.read(self.char, prior_input=prior_char)
                     prediction = self.classifier.predict()
@@ -125,7 +125,7 @@ def main(argv):
     # Defaults
     kwargs = {
         'crop': 400,
-        'filename': "longer_char_sequences1.txt" # "simple_pattern2.txt"
+        'filename': "simple_pattern2.txt" # "simple_pattern2.txt"
     }
     for opt, arg in opts:
         if opt == '-h':
@@ -135,7 +135,7 @@ def main(argv):
             kwargs['crop'] = int(arg)
         elif opt in ("-f", "--file"):
             kwargs['filename'] = arg
-    processor = TestRunner(animate=True, with_classifier=True, **kwargs)
+    processor = TestRunner(animate=True, with_classifier=False, **kwargs)
     processor.run()
 
 if __name__ == "__main__":

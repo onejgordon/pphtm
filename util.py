@@ -3,6 +3,7 @@
 import numpy as np
 import math
 from datetime import datetime
+import random
 
 def bearingFromVector(dir_unit_vector):
     dx, dy = dir_unit_vector
@@ -153,3 +154,8 @@ def duration(startDate, endDate, hideZeros=False):
     if startDate and endDate:
         return secsToDuration((endDate-startDate).total_seconds(), hideZeros=hideZeros)
     return None
+
+def jitter(center, radius=None):
+    if radius is None:
+        radius = center / 3.
+    return center + 2*radius*(random.random()-0.5)

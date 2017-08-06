@@ -2,7 +2,7 @@
 
 * Basic implementation of HTM network (See Numenta, Hawkins)
 * Adjusted to support continuous activations that fall off over time at different rates
-* Temporal pooler removed in favor of spatial-temperal pooling
+* Temporal pooler removed in favor of spatial-temporal pooling
 * pphtm includes top-down predictions
 * http://numenta.org/resources/HTM_CorticalLearningAlgorithms.pdf
 

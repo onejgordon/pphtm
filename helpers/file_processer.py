@@ -42,6 +42,5 @@ class FileProcesser(object):
         else:
             return char
 
-
     def reset(self):
         self.cursor = 0

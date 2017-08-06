@@ -8,24 +8,68 @@ from pphtm.util import printarray
 
 # Settings (global vars, other vars set in brain.__init__)
 
-VERBOSITY = 0
+VERBOSITY = 1
 DEF_MIN_OVERLAP = 2
-CONNECTED_PERM = 0.2  # If the permanence value for a synapse is greater than this value, it is said to be connected.
-DUTY_HISTORY = 40
+# If the permanence value for a synapse is greater than this value, it is
+# said to be connected.
+CONNECTED_PERM = 0.2
+
 
 INIT_PERMANENCE = 0.2  # New learned synapses
-INIT_PERMANENCE_JITTER = 0.05  # Max offset from CONNECTED_PERM when initializing synapses
-T_START_PROXIMAL_BOOSTING = 0
-T_START_DISTAL_BOOSTING = -1
-BIAS_DUTY_CUTOFF = 1.0
-PROXIMITY_WEIGHTING = 1 # (bool) For proximal connection init.
-LIMIT_BIAS_DUTY_CYCLE = 0.6 # If biased > 60% of recent history
+# Max offset from CONNECTED_PERM when initializing synapses
+INIT_PERMANENCE_JITTER = 0.05
+PROXIMITY_WEIGHTING = 1  # (bool) For proximal connection init.
+
+# Continuous timing
+TIME_CONSTANT = 1  # Distance traveled per step
+SPIKE_ACTIVATION_INCR = 0.25
+CELL_ACTIVATION_THRESH = 5
+AVE_SYN_DIST_DISTAL = 2.5
+AVE_SYN_DIST_TOPDOWN = 3.5
+AVE_SYN_DIST_PROX = 1.5
+LEARN_SPIKE_DIST = TIME_CONSTANT  # Radius within which to learn
+LEARN_DIST_CHANGE = .05
+AXON_MIN_LEN = 1
+AXON_MAX_LEN = 4
+POST_SPIKE_RESET_ACTIVATION = 0.0
+EXPIRE_SPIKE_DISTANCE = max([
+    AVE_SYN_DIST_PROX,
+    AVE_SYN_DIST_DISTAL,
+    AVE_SYN_DIST_TOPDOWN])*1.5  # After which all spikes are removed (max dendrite length?)
+
 
 def log(message, level=1):
     if VERBOSITY >= level:
         print message
 
+
+class Spike(object):
+
+    '''
+    Represent an action potential spike initiated at a particular
+    time for a particular cell.
+
+    Dendrites sourced from this cell will periodically check
+    whether these spikes have reached their cell body,
+    at which point the activation of the down-stream cell is incremented.
+
+    '''
+
+    def __init__(self, t):
+        self.t_init = t  # Time step
+
+    def __repr__(self):
+        return "<Spike term=%d />" % self.t_term
+
+    def distance_travelled(self, t_now):
+        '''
+        How far spike has traveled from cell body
+        '''
+        return (t_now - self.t_init) * TIME_CONSTANT
+
+
 class Segment(object):
+
     '''
     Dendrite segment of cell (proximal, distal, or top-down prediction)
     Store all synapses activations / connectedness in arrays
@@ -39,10 +83,12 @@ class Segment(object):
 
     Questions: how to move synapse distance, learning rule? Based on delay, or
     current activation when segment activates?
+
+    Unmodeled: Speed through each dendrite (time constant varies with diameter, etc)
     '''
     PROXIMAL = 1
     DISTAL = 2
-    TOPDOWN = 3  # prediction
+    TOPDOWN = 3  # feedback
 
     def __init__(self, cell, index, region, type=None):
         self.index = index  # Segment index
@@ -51,7 +97,8 @@ class Segment(object):
         self.type = type if type else self.PROXIMAL
 
         # Synapses (all lists below len == # of synapses)
-        self.syn_sources = []  # Index of source (either input or cell in region, or above)
+        # Index of source (either input or cell in region, or above)
+        self.syn_sources = []
         self.syn_permanences = []  # (0,1)
         self.syn_distances = []  # (0,1) Distance from cell body
         self.syn_change = []  # -1, 0 1 (after step)
@@ -69,13 +116,17 @@ class Segment(object):
         if self.proximal():
             # Setup initial potential synapses for proximal segments
             n_inputs = self.region.n_inputs
-            cell_x, cell_y = util.coords_from_index(self.cell.index, self.region._cell_side_len())
+            cell_x, cell_y = util.coords_from_index(
+                self.cell.index, self.region._cell_side_len())
             for source in range(n_inputs):
-                # Loop through all inputs and randomly choose to create synapse or not
-                input_x, input_y = util.coords_from_index(source, self.region._input_side_len())
+                # Loop through all inputs and randomly choose to create synapse
+                # or not
+                input_x, input_y = util.coords_from_index(
+                    source, self.region._input_side_len())
                 dist = util.distance((cell_x, cell_y), (input_x, input_y))
                 max_distance = self.region.diagonal
-                chance_of_synapse = ((self.region.brain.config("MAX_PROXIMAL_INIT_SYNAPSE_CHANCE") - self.region.brain.config("MIN_PROXIMAL_INIT_SYNAPSE_CHANCE")) * (1 - float(dist)/max_distance)) + self.region.brain.config("MIN_PROXIMAL_INIT_SYNAPSE_CHANCE")
+                chance_of_synapse = ((self.region.brain.config("MAX_PROXIMAL_INIT_SYNAPSE_CHANCE") - self.region.brain.config(
+                    "MIN_PROXIMAL_INIT_SYNAPSE_CHANCE")) * (1 - float(dist)/max_distance)) + self.region.brain.config("MIN_PROXIMAL_INIT_SYNAPSE_CHANCE")
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(source)
@@ -85,14 +136,16 @@ class Segment(object):
                 if index == cell_index:
                     # Avoid creating synapse with self
                     continue
-                chance_of_synapse = self.region.brain.config("DISTAL_SYNAPSE_CHANCE")
+                chance_of_synapse = self.region.brain.config(
+                    "DISTAL_SYNAPSE_CHANCE")
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(index)
         else:
             # Top down connections
             for index in range(self.region.n_cells_above):
-                chance_of_synapse = self.region.brain.config("TOPDOWN_SYNAPSE_CHANCE")
+                chance_of_synapse = self.region.brain.config(
+                    "TOPDOWN_SYNAPSE_CHANCE")
                 add_synapse = random.random() < chance_of_synapse
                 if add_synapse:
                     self.add_synapse(index)
@@ -108,14 +161,24 @@ class Segment(object):
     def topdown(self):
         return self.type == self.TOPDOWN
 
-    def add_synapse(self, source_index=0, permanence=None):
+    def add_synapse(self, source_index=0, permanence=None, distance=None):
         if permanence is None:
-            permanence = CONNECTED_PERM + INIT_PERMANENCE_JITTER*(random.random()-0.5)
+            permanence = util.jitter(CONNECTED_PERM, INIT_PERMANENCE_JITTER/2)
+        if distance is None:
+            if self.proximal():
+                ave = AVE_SYN_DIST_PROX
+            elif self.distal():
+                ave = AVE_SYN_DIST_DISTAL
+            elif self.topdown():
+                ave = AVE_SYN_DIST_TOPDOWN
+            distance = util.jitter(ave)
         self.syn_sources.append(source_index)
         self.syn_permanences.append(permanence)
+        self.syn_distances.append(distance)
         self.syn_change.append(0)
         self.syn_prestep_contribution.append(0)
         self.syn_contribution.append(0)
+        log("Adding synapse at index %d, dist: %s" % (source_index, distance))
 
     def synapse_state(self, index=0):
         '''
@@ -135,7 +198,7 @@ class Segment(object):
             synapse_index (int)
 
         Returns:
-            Cell() object in own region or region above (if top-down segment)
+            Cell() object in own region or region above/below
         '''
         source = self.source(synapse_index)
         if self.proximal():
@@ -162,7 +225,8 @@ class Segment(object):
             self.syn_permanences[syn] -= decay
 
     def distance_from(self, coords_xy, index=0):
-        source_xy = util.coords_from_index(self.syn_sources[index], self.region._input_side_len())
+        source_xy = util.coords_from_index(
+            self.syn_sources[index], self.region._input_side_len())
         return util.distance(source_xy, coords_xy)
 
     def connected(self, index=0, connectionPermanence=CONNECTED_PERM):
@@ -175,60 +239,6 @@ class Segment(object):
             self.TOPDOWN: "Top-Down"
         }.get(self.type)
 
-    def contribution(self, syn_index=0, absolute=False):
-        '''Returns would-be contribution from a synapse. Permanence is not considered.
-
-        Args:
-            syn_index is a synapse index (within segment, not full region)
-
-        Returns:
-            double: a contribution (activation) [-1.0,1.0] of synapse at index
-        '''
-        if self.proximal():
-            activation = self.region._input_active(self.syn_sources[syn_index])
-            mult = 1
-        else:
-            # distal or top-down
-            cell = self.source_cell(syn_index)
-            activation = cell.activation
-            mult = 1 if cell.excitatory else -1
-        if not absolute:
-            activation *= mult
-        return activation
-
-    def total_activation(self):
-        '''Returns sum of contributions from all connected synapses.
-
-        Return: double (not bounded)
-        '''
-        connected_syn_sources = np.take(np.asarray(self.syn_sources, dtype='int32'), self.connected_synapses())
-        if self.proximal():
-            region_below = self.region.region_below()
-            excitatory_activation_mult = region_below.excitatory_activation_mult if region_below else np.ones(self.region.n_inputs)
-            return sum(np.take(self.region.input * excitatory_activation_mult, connected_syn_sources))
-        elif self.distal():
-            DISTAL_FLOOR = 0.8
-            filtered_activation = self.region.activation > DISTAL_FLOOR
-            return sum(np.take(filtered_activation * self.region.excitatory_activation_mult, connected_syn_sources))
-        else:
-            # top down
-            region_above = self.region.region_above()
-            if region_above:
-                connected_syn_sources = np.take(self.syn_sources, self.connected_synapses())
-                return sum(np.take(region_above.activation * region_above.excitatory_activation_mult, connected_syn_sources))
-            else:
-                return 0.0
-
-    def threshold(self):
-        threshold = self.region.brain.config("PROXIMAL_ACTIVATION_THRESHHOLD") if self.proximal() else self.region.brain.config("DISTAL_ACTIVATION_THRESHOLD")
-        return threshold
-
-    def active(self):
-        '''
-        TODO: Cache this?
-        '''
-        return self.total_activation() >= self.threshold()
-
     def n_synapses(self):
         return len(self.syn_sources)
 
@@ -239,14 +249,47 @@ class Segment(object):
         '''
         Return array of cell indexes (in segment)
         '''
-        connected_indexes = [i for i,p in enumerate(self.syn_permanences) if p >= connectionPermanence]
+        connected_indexes = [
+            i for i, p in enumerate(self.syn_permanences) if p >= connectionPermanence]
         return connected_indexes
+
+    def nearest_spike(self, synapse_index):
+        '''
+        Return relative distance to nearest (to synapse_index's distance/location)
+        active spike on this segment.
+        Positive: nearest spike is farther from cell body
+        '''
+        min_rel_dist = None
+        distance = self.syn_distances[synapse_index]
+        for j in range(self.n_synapses()):
+            if j == synapse_index:
+                continue  # Skip target synapse
+            cell = self.source_cell(j)
+            if cell:
+                comp_dist = self.syn_distances[j]
+                dist_between_synapses = comp_dist - distance
+                # Positive = comparison synapse farther
+                # Negative = comparison synapse closer, find most recent spike
+                # (closest to 0 distance travelled)
+                near_spike, post_synapse_dist = cell.nearest_postsynaptic_spike_to(
+                    dist_between_synapses)
+                if near_spike:
+                    rel_dist = dist_between_synapses - post_synapse_dist
+                    if min_rel_dist is None or rel_dist < min_rel_dist:
+                        min_rel_dist = rel_dist
+        return min_rel_dist
 
 
 class Cell(object):
+
     '''
-    An HTM abstraction of one or more biological neurons
     Has multiple dendrite segments connected to inputs
+
+    Stores a list of active spikes, which will move along any segments
+    sourced from this cell. We assume the full distance is captured by
+    the dendrite (we don't represent cell axons). Synapses can occur
+    at any location along a dendrite segment, which represents the initial
+    distance of the spike to the post-synaptic cell body.
     '''
 
     def __init__(self, region, index):
@@ -254,40 +297,92 @@ class Cell(object):
         self.region = region
         self.n_proximal_segments = self.region.brain.config("PROX_SEGMENTS")
         self.n_distal_segments = self.region.brain.config("DISTAL_SEGMENTS")
-        self.n_topdown_segments = self.region.brain.config("TOPDOWN_SEGMENTS") if not self.region.is_top() else 0
+        self.n_topdown_segments = self.region.brain.config(
+            "TOPDOWN_SEGMENTS") if not self.region.is_top() else 0
         self.distal_segments = []
         self.proximal_segments = []
         self.topdown_segments = []
-        self.activation = 0.0 # [0.0, 1.0]
-        self.coords = util.coords_from_index(index, self.region._cell_side_len())
+        self.spikes = []  # Active spikes
+        self.activation = 0.0  # [0.0, 1.0]
+        self.spiking = False
+        self.last_spike_t = None  # Time step
+        self.axon_length = random.random() * (AXON_MAX_LEN - AXON_MIN_LEN) + \
+            AXON_MIN_LEN
+        self.coords = util.coords_from_index(
+            index, self.region._cell_side_len())
         self.fade_rate = self.region.brain.config("FADE_RATE")
-        self.excitatory = random.random() > self.region.brain.config("CHANCE_OF_INHIBITORY")
-
-        # History
-        self.recent_active_duty = []  # After inhibition, list of bool
-        self.recent_overlap_duty = []  # Overlap > min_overlap, list of bool
-        self.recent_bias_duty = []  # Bias > BIAS_DUTY_CUTOFF, list of bool
+        self.excitatory = random.random() > self.region.brain.config(
+            "CHANCE_OF_INHIBITORY")
 
     def __repr__(self):
-        return "<Cell index=%d activation=%.1f bias=%s overlap=%s />" % (self.index, self.activation, self.region.bias[self.index], self.region.overlap[self.index])
+        return "<Cell index=%d activation=%.1f spiking=%s spikes=%d />" % (self.index, self.activation, self.region.spiking[self.index], len(self.spikes))
 
     def initialize(self):
         for i in range(self.n_proximal_segments):
             proximal = Segment(self, i, self.region, type=Segment.PROXIMAL)
-            proximal.initialize() # Creates synapses
+            proximal.initialize()  # Creates synapses
             self.proximal_segments.append(proximal)
         for i in range(self.n_distal_segments):
             distal = Segment(self, i, self.region, type=Segment.DISTAL)
-            distal.initialize() # Creates synapses
+            distal.initialize()  # Creates synapses
             self.distal_segments.append(distal)
         for i in range(self.n_topdown_segments):
             topdown = Segment(self, i, self.region, type=Segment.TOPDOWN)
-            topdown.initialize() # Creates synapses
+            topdown.initialize()  # Creates synapses
             self.topdown_segments.append(topdown)
         log("Initialized %s" % self)
 
     def all_segments(self):
         return self.proximal_segments + self.distal_segments + self.topdown_segments
+
+    def terminating_spikes(self, segment_distance):
+        '''
+        Return Spike objects that should terminate now
+        '''
+        terminating = []
+        n_spikes = len(self.spikes)
+        for i, spike in enumerate(reversed(self.spikes)):
+            spike_distance = spike.distance_travelled(self.region.brain.t)
+            distance = segment_distance + self.axon_length
+            # Within 1-step window
+            dmin, dmax = distance, distance + TIME_CONSTANT
+            if spike_distance >= dmin and spike_distance < dmax:
+                # Arrival of spike
+                terminating.append(spike)
+            elif spike_distance >= EXPIRE_SPIKE_DISTANCE:
+                # All remaining spikes are expired
+                self.spikes = self.spikes[n_spikes - i:]
+        return terminating
+
+    def postsynaptic_distance_travelled(self, spike):
+        return max([0, spike.distance_travelled(self.region.brain.t) - self.axon_length])
+
+    def nearest_postsynaptic_spike_to(self, distance):
+        '''Find the spike that has, at present, travelled a distance
+        nearest to 'distance' after the synapse at end of axon.
+
+        Args:
+            distance (float): target distance travelled (post synapse)
+
+        Returns:
+            tuple (2):
+                Spike: nearest spike
+                float: distance from synapse for nearest spike
+
+        '''
+        nearest_spike_post_synapse_dist = None
+        nearest_spike = None
+        nearest_spike_delta = None
+        for spike in self.spikes:
+            dist_travelled = spike.distance_travelled(self.region.brain.t)
+            post_synapse_dist = dist_travelled - self.axon_length
+            if post_synapse_dist > 0:
+                delta = abs(post_synapse_dist - distance)
+                if not nearest_spike_delta or delta < nearest_spike_delta:
+                    nearest_spike_delta = delta
+                    nearest_spike_post_synapse_dist = post_synapse_dist
+                    nearest_spike = spike
+        return (nearest_spike, nearest_spike_post_synapse_dist)
 
     def active_segments(self, type=Segment.PROXIMAL):
         segs = {
@@ -295,28 +390,7 @@ class Cell(object):
             Segment.DISTAL: self.distal_segments,
             Segment.TOPDOWN: self.topdown_segments
         }.get(type)
-        return filter(lambda seg : seg.active(), segs)
-
-    def update_duty_cycles(self, active=False, overlap=False, bias=False):
-        '''
-        Add current active state & overlap state to history and recalculate duty cycles
-        '''
-        self.recent_active_duty.insert(0, 1 if active else 0)
-        self.recent_overlap_duty.insert(0, 1 if overlap else 0)
-        self.recent_bias_duty.insert(0, 1 if bias else 0)
-        # Truncate
-        if len(self.recent_active_duty) > DUTY_HISTORY:
-            self.recent_active_duty = self.recent_active_duty[:DUTY_HISTORY]
-        if len(self.recent_overlap_duty) > DUTY_HISTORY:
-            self.recent_overlap_duty = self.recent_overlap_duty[:DUTY_HISTORY]
-        if len(self.recent_bias_duty) > DUTY_HISTORY:
-            self.recent_bias_duty = self.recent_bias_duty[:DUTY_HISTORY]
-        cell_active_duty = sum(self.recent_active_duty) / float(len(self.recent_active_duty))
-        cell_overlap_duty = sum(self.recent_overlap_duty) / float(len(self.recent_overlap_duty))
-        cell_bias_duty = sum(self.recent_bias_duty) / float(len(self.recent_bias_duty))
-        self.region.active_duty_cycle[self.index] = cell_active_duty
-        self.region.overlap_duty_cycle[self.index] = cell_overlap_duty
-        self.region.bias_duty_cycle[self.index] = cell_bias_duty
+        return filter(lambda seg: seg.active(), segs)
 
     def connected_receptive_field_size(self):
         '''
@@ -326,7 +400,8 @@ class Cell(object):
         side_len = self.region._input_side_len()
         distances = []
         for i in connected_indexes:
-            distance = util.distance(util.coords_from_index(i, side_len), self.coords)
+            distance = util.distance(
+                util.coords_from_index(i, side_len), self.coords)
             distances.append(distance)
         if distances:
             return max(distances)
@@ -344,15 +419,16 @@ class Cell(object):
         synapses = self.connected_synapses(type=Segment.DISTAL)
         return synapses.count(cell_index)
 
-    def most_active_segment(self, type="distal"):
-        if type == "distal":
-            return sorted(self.distal_segments, key=lambda seg : seg.total_activation(), reverse=True)[0]
-        if type == "topdown":
-            return sorted(self.topdown_segments, key=lambda seg : seg.total_activation(), reverse=True)[0]
-        else:
-            return None
+    def spike(self, t):
+        log("%s is spiking" % self)
+        self.spikes.append(Spike(t))
+        self.spiking = True
+        self.activation = POST_SPIKE_RESET_ACTIVATION
+        self.last_spike_t = t
+
 
 class Region(object):
+
     '''
     Made up of many columns
     '''
@@ -362,7 +438,7 @@ class Region(object):
         self.brain = brain
 
         # Region constants (spatial)
-        self.inhibition_radius = 0
+        self.inhibition_radius = 2
 
         # Hierarchichal setup
         self.n_cells = n_cells
@@ -371,24 +447,28 @@ class Region(object):
         self.cells = []
 
         # State (historical)
-        self.input = None  # Inputs at time t - input[t, j] is double [0.0, 1.0]
+        # Inputs at time t - input[t, j] is double [0.0, 1.0]
+        self.input = None
 
         # State
-        self.overlap = np.zeros(self.n_cells)  # Overlap for each cell. overlap[c] is double
+        # Overlap for each cell. overlap[c] is double
+        self.overlap = np.zeros(self.n_cells)
         self.pre_bias = np.zeros(self.n_cells)  # Prestep bias
-        self.bias = np.zeros(self.n_cells)  # Bias for each cell. overlap[c] is double
-        self.pre_activation = np.zeros(self.n_cells)  # Activation before inhibition for each cell.
-        self.activation = np.zeros(self.n_cells)
-        self.boost = np.ones(self.n_cells, dtype=float)  # Boost value for cell c
-        self.overlap_duty_cycle = np.zeros((self.n_cells))  # Sliding average: how often column c has had significant overlap (> min_overlap)
-        self.active_duty_cycle = np.zeros((self.n_cells))  # Sliding average: how often column c has been active after inhibition
-        self.bias_duty_cycle = np.zeros((self.n_cells))  # Sliding average: how often column c has been biased (distal or topdown)
+        # Bias for each cell. overlap[c] is double
+        self.bias = np.zeros(self.n_cells)
+        # Activation before inhibition for each cell.
+        self.pre_activation = np.zeros(self.n_cells)
+        # Each cell that's spiking in this time step
+        self.spiking = np.zeros(self.n_cells)
+        # Boost value for cell c
+        self.boost = np.ones(self.n_cells, dtype=float)
+        self.bias = np.zeros(self.n_cells)
         self.last_activation = None  # Hold last step in state for rendering
 
         # Helpers
         self.diagonal = 1.414*2*math.sqrt(n_cells)
-        self.excitatory_activation_mult = np.ones(self.n_cells)  # Matrix of 1 or -1 for each cell (after initialization)
-
+        # Matrix of 1 or -1 for each cell (after initialization)
+        self.excitatory_activation_mult = np.ones(self.n_cells)
 
     def __str__(self):
         return "<Region inputs=%d cells=%d />" % (self.n_inputs, len(self.cells))
@@ -441,18 +521,14 @@ class Region(object):
         '''
         if cells:
             cell_values = [values[c.index] for c in cells]
-            _k = min([k, len(values)]) # TODO: Ok to pick last if k > overlaps?
-            cell_values = sorted(cell_values, reverse=True) # Highest to lowest
+            # TODO: Ok to pick last if k > overlaps?
+            _k = min([k, len(values)])
+            # Highest to lowest
+            cell_values = sorted(cell_values, reverse=True)
             kth_value = cell_values[_k-1]
             # log("%s is %dth highest overlap score in sequence: %s" % (kth_value, k, overlaps))
             return kth_value
-        return 0 # Shouldn't happen?
-
-    def _max_duty_cycle(self, cells):
-        if cells:
-            return max([self.active_duty_cycle[c.index] for c in cells])
-        else:
-            return 0
+        return 0  # Shouldn't happen?
 
     def _neighbors_of(self, cell):
         '''
@@ -462,330 +538,184 @@ class Region(object):
         for c in self.cells:
             if cell.index == c.index:
                 continue
-            dist = util.dist_from_indexes(c.index, cell.index, self._cell_side_len())
+            dist = util.dist_from_indexes(
+                c.index, cell.index, self._cell_side_len())
             if dist <= self.inhibition_radius:
                 _neighbors.append(c)
-        # log("Got %d neighbors. Overlaps: %s" % (len(_neighbors), [self.overlap[n.index] for n in _neighbors]))
+        # log("Got %d neighbors. Overlaps: %s" % (len(_neighbors), [self.pre_activation[n.index] for n in _neighbors]))
         return _neighbors
 
-    def _boost_function(self, c, min_duty_cycle):
-        if self.active_duty_cycle[c] >= min_duty_cycle:
-            b = 1.0
-        else:
-            b = 1 + (min_duty_cycle - self.active_duty_cycle[c]) * self.brain.config("BOOST_MULTIPLIER")
-        return b
-
-    def _increase_cell_permanences(self, c, increase, excitatory=True, type="proximal"):
+    def do_terminate_spikes(self):
         '''
-        Increase the permanence value of every matching synapse of cell c by a increase factor
-        Currently increases synapses across all segments
-
-        Args:
-            excitatory (bool): Increase excitatory or inhibitory synapses
-            type (string): Which segments to increase
-
-        TODO: Should this be for a specific segment
+        Check each cell for segments connected to sources
+        with spikes termating on this time step.
         '''
-        cell = self.cells[c]
-        if type == "proximal":
-            for seg in self.cells[c].proximal_segments:
-                for i, perm in enumerate(seg.syn_permanences):
-                    source_cell = seg.source_cell(i)
-                    if (source_cell and source_cell.excitatory == excitatory):
-                        seg.syn_permanences[i] = min([perm+increase, 1.0])
-
-        elif type == "distal":
-            for seg in self.cells[c].distal_segments:
-                for i, perm in enumerate(seg.syn_permanences):
-                    source_cell = seg.source_cell(i)
-                    if source_cell.excitatory == excitatory:
-                        seg.syn_permanences[i] = min([perm+increase, 1.0])
-
-        elif type == "topdown":
-            for seg in self.cells[c].topdown_segments:
-                for i, perm in enumerate(seg.syn_permanences):
-                    source_cell = seg.source_cell(i)
-                    if source_cell.excitatory == excitatory:
-                        seg.syn_permanences[i] = min([perm+increase, 1.0])
-
-    def calculate_biases(self):
-        '''
-        For each cell calculate aggregate activations from distal segments
-        Result is a bias array that will be used during overlap to increase
-        chances we activate 'predicted' cells
-
-        For PP bias array now includes top-down biases
-
-        Updates active_before_learning for each segment for next step
-
-        TODO: weight topdown vs distal
-        '''
-        bias = np.zeros(len(self.cells))  # Initialize bias to 0
+        total_spikes = 0
+        total_cells = 0
+        self.bias = np.zeros(self.n_cells)
         for i, c in enumerate(self.cells):
-            for seg in (c.distal_segments + c.topdown_segments):
-                seg.active_before_learning = seg.active()
-                increment = 1 if seg.distal() else self.brain.config("TOPDOWN_BIAS_WEIGHT")
-                if seg.active_before_learning:
-                    bias[i] += increment
-        return bias
-
-    def do_overlap(self):
-        '''
-        Return overlap as a double for each cell representing boosted
-        activation from proximal inputs
-        '''
-        overlaps = np.zeros(len(self.cells))  # Initialize overlaps to 0
-        for i, c in enumerate(self.cells):
-            for seg in c.proximal_segments:
-                seg.active_before_learning = seg.active()
-                if seg.active_before_learning:
-                    overlaps[i] += 1
-            # Note this boost is calculated on prior step
-            overlaps[i] *= self.boost[i]
-        return overlaps
+            if c.activation > 0:
+                # Fade activations
+                c.activation = max([c.activation - c.fade_rate, 0])
+            cell_terminated = False
+            for seg in c.all_segments():
+                for j in seg.connected_synapses():
+                    source = seg.source_cell(j)
+                    n_spikes = 0
+                    if source:
+                        dist = seg.syn_distances[j]
+                        n_spikes = len(source.terminating_spikes(dist))
+                        total_spikes += n_spikes
+                        if n_spikes:
+                            cell_terminated = True
+                    else:
+                        # Region 1 inputs act as 0-distance connections --
+                        # activate immediately
+                        n_spikes = 1 if self._input_active(
+                            seg.syn_sources[j]) else 0
+                    if n_spikes:
+                        # log("Terminating %d spikes on %s" % (n_spikes, c))
+                        c.activation += n_spikes * \
+                            SPIKE_ACTIVATION_INCR + (random.random() / 20.)
+                        if seg.distal() or seg.topdown():
+                            self.bias[i] = 1
+            if cell_terminated:
+                total_cells += 1
+            self.pre_activation[i] = c.activation
+        log("Terminating %d spikes on %d cells" % (total_spikes, total_cells))
 
     def do_inhibition(self):
         '''
-        Inputs:
-            - Overlaps (proximal)
-            - Bias (distal/topdown)
-        Sum the two (weighted) and choose winners (active outputs)
+        Choose winners of cells with activation > threshold.
+        Populates pre_activation
 
-        TODO: Try modulating weighting based on recent distal/topdown vs proximal activity
+        Returns:
+            Boolean array of which cells to activate (generate spikes)
         '''
-        self.pre_activation = (self.brain.config("OVERLAP_WEIGHT") * self.overlap) * (1 + (self.brain.config("BIAS_WEIGHT") * self.bias))
-        # self.pre_activation = (self.brain.config("OVERLAP_WEIGHT") * self.overlap) + (self.brain.config("BIAS_WEIGHT") * self.bias)
-        active = np.zeros(len(self.cells))
+        active = np.zeros(self.n_cells)
         for c in self.cells:
-            pa = self.pre_activation[c.index]
+            pa = c.activation
             neighbors = self._neighbors_of(c)
-            kth_score = self._kth_score(neighbors, self.pre_activation, k=self.brain.config("DESIRED_LOCAL_ACTIVITY"))
+            kth_score = self._kth_score(
+                neighbors, self.pre_activation, k=self.brain.config("DESIRED_LOCAL_ACTIVITY"))
             if pa > 0 and pa >= kth_score:
-                active[c.index] = True
+                active[c.index] = 1
         return active
 
-    def learn_segment(self, seg, is_activating=False, is_biased=False):
-        '''Update synapse permanences for this segment.
-
-        Synapse's permanence will increase if::
-            a) it is contributing from an excitatory source, and
-            b) cell is activating
-
-        Synapse's permanence will decrease if::
-            a) it is contributing from an excitatory source, and
-            b) cell is not activating, but is biased
-
-        TODO: Move all learning logic here for clarity?
+    def do_generate_spikes(self, spiking_after_inhibition):
         '''
-        n_inc = n_dec = n_conn = n_discon = 0
-        active = seg.active_before_learning
-        for i in range(seg.n_synapses()):
-            seg.syn_change[i] = 0
-            was_connected = seg.connected(i)
-            source_cell = seg.source_cell(i)
-            source_excitatory = not source_cell or source_cell.excitatory # Inputs excitatory
-            contribution = seg.contribution(i, absolute=True)
-            learn_threshold = self.brain.config("DIST_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD") if (seg.distal() or seg.topdown()) else self.brain.config("PROX_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD")
-            contributor = contribution >= learn_threshold
-            seg.syn_contribution[i] = contributor
-            increase_permanence = decrease_permanence = False
-            if seg.proximal():
-                change_permanence = seg.active_before_learning and is_activating and source_excitatory
-            else:
-                change_permanence = contributor and source_excitatory
-            if change_permanence:
-                if seg.proximal():
-                    increase_permanence = contributor
-                    decrease_permanence = False # (just decay) not contributor
-                else:
-                    increase_permanence = is_activating
-                    decrease_permanence = not is_activating and is_biased
-                if increase_permanence and seg.syn_permanences[i] < 1.0:
-                    n_inc += 1
-                    seg.syn_permanences[i] += self.brain.config("PERM_LEARN_INC")
-                    seg.syn_permanences[i] = min(1.0, seg.syn_permanences[i])
-                    seg.syn_change[i] += 1
-                elif decrease_permanence and seg.syn_permanences[i] > 0.0:
-                    n_dec +=1
-                    seg.syn_permanences[i] -= self.brain.config("PERM_LEARN_DEC")
-                    seg.syn_permanences[i] = max(0.0, seg.syn_permanences[i])
-                    seg.syn_change[i] -= 1
-                connection_changed = was_connected != seg.connected(i)
-                if connection_changed:
-                    connected = not was_connected
-                    if connected:
-                        n_conn += 1
-                    else:
-                        n_discon += 1
-        return (n_inc, n_dec, n_conn, n_discon)
+        For each cell:
+            - If activation above threshold, generate spikes
+                which will be monitored by all downstream cells.
 
-    def do_learning(self, activating):
-        '''Update permanences for each segment according to learning rules.
-
-        Proximal:
-            Learn segments to activating cells
-
-        Distal / Topdown:
-            If cell activating: learn active segments, or all if none active
-            If cell not activating, but is biased: learn on active segments
-
-        Args:
-            activating (np.array - bool): Activation in this step after inhibition
         '''
-        n_increased_prox = n_decreased_prox = n_increased_dist = n_decreased_dist = n_conn_prox = n_discon_prox = n_conn_dist = n_discon_dist = 0
-        for i, cell_is_activating in enumerate(activating):
-            cell = self.cells[i]
-            cell_biased = self.bias[i] # Thresh?
-            any_distal_active = any([seg.active_before_learning for seg in cell.distal_segments])
-            any_topdown_active = any([seg.active_before_learning for seg in cell.topdown_segments])
-            for seg in cell.all_segments():
-                seg_active = seg.active_before_learning
-                segment_learns = False
-                if seg.proximal():
-                    segment_learns = cell_is_activating
-                elif seg.distal():
-                    segment_learns = (cell_is_activating and (seg_active or not any_distal_active)) or \
-                        (cell_biased and not cell_is_activating and seg_active)
-                elif seg.topdown():
-                    segment_learns = (cell_is_activating and (seg_active or not any_topdown_active)) or \
-                        (cell_biased and not cell_is_activating and seg_active)
+        self.spiking = np.zeros(self.n_cells)
+        for i, c in enumerate(self.cells):
+            c.spiking = False
+            spiking = spiking_after_inhibition[i]
+            if spiking:
+                c.spike(self.brain.t)
+                self.spiking[i] = 1
 
-                if segment_learns:
-                    ni, nd, nc, ndc = self.learn_segment(seg, is_activating=cell_is_activating, is_biased=cell_biased)
-                    n_increased_prox += ni
-                    n_decreased_prox += nd
-                    n_conn_prox += nc
-                    n_discon_prox += ndc
-                else:
-                    # Re-initialize change state
-                    seg.decay_permanences()
-                    seg.syn_change = [0 for x in seg.syn_change]
-
-        log("Distal/Topdown: +%d/-%d (%d connected, %d disconnected)" % (n_increased_dist, n_decreased_dist, n_conn_dist, n_discon_dist))
-
-        n_boosted = 0
-        all_field_sizes = []
-        for i, cell in enumerate(self.cells):
-            neighbors = self._neighbors_of(cell)
-            min_duty_cycle = 0.01 * self._max_duty_cycle(neighbors) # Based on active duty
-            cell_active = activating[i]
-            sufficient_overlap = self.overlap[i] > self.brain.min_overlap
-            biased = self.bias[i] > BIAS_DUTY_CUTOFF
-            cell.update_duty_cycles(active=cell_active, overlap=sufficient_overlap, bias=biased)
-            boost_inhibitory = self.bias_duty_cycle[i] > LIMIT_BIAS_DUTY_CYCLE
-            if boost_inhibitory:
-                self._increase_cell_permanences(i, self.brain.config("DISTAL_BOOST_MULT") * CONNECTED_PERM, type="distal", excitatory=False)
-                self._increase_cell_permanences(i, self.brain.config("DISTAL_BOOST_MULT") * CONNECTED_PERM, type="topdown", excitatory=False)
-            if T_START_PROXIMAL_BOOSTING != -1 and self.brain.t > T_START_PROXIMAL_BOOSTING:
-                self.boost[i] = self._boost_function(i, min_duty_cycle)  # Updates boost value for cell (higher if below min)
-
-                # Check if overlap duty cycle less than minimum (note: min is calculated from max *active* not overlap)
-                if self.overlap_duty_cycle[i] < min_duty_cycle:
-                    # log("Increasing permanences for cell %s in region %d due to overlap duty cycle below min: %s" % (i, self.index, min_duty_cycle))
-                    self._increase_cell_permanences(i, 0.1 * CONNECTED_PERM, type="proximal")
-                    n_boosted += 1
-
-            if T_START_DISTAL_BOOSTING != -1 and self.brain.t > T_START_DISTAL_BOOSTING:
-                if self.bias_duty_cycle[i] < min_duty_cycle:
-                    # TODO: Confirm this is working
-                    self._increase_cell_permanences(i, self.brain.config("DISTAL_BOOST_MULT") * CONNECTED_PERM, type="distal")
-                    self._increase_cell_permanences(i, self.brain.config("DISTAL_BOOST_MULT") * CONNECTED_PERM, type="topdown")
-                    n_boosted += 1
-            all_field_sizes.append(self.cells[i].connected_receptive_field_size())
-
-        if n_boosted:
-            log("Boosting %d due to low overlap duty cycle" % n_boosted)
-
-        # Update inhibition radius (based on updated active connections in each column)
-        self.inhibition_radius = util.average(all_field_sizes) * self.brain.config("INHIBITION_RADIUS_DISCOUNT")
-        min_positive_radius = 1.0
-        if self.inhibition_radius and self.inhibition_radius < min_positive_radius:
-            self.inhibition_radius = min_positive_radius
-        log("Setting inhibition radius to %s" % self.inhibition_radius)
-
-    def tempero_spatial_pooling(self, learning_enabled=True):
+    def region_process(self):
         '''
-        Temporal-Spatial pooling routine
+        Region processing routine
         --------------
         Takes input and calculates active columns (sparse representation)
         This is a representation of input in context of previous input
         (same region and regions above -- top-down predictions)
         '''
 
-        # Phase 1: Overlap
-        self.overlap = self.do_overlap()
-        if VERBOSITY >= 2: log("%s << Overlap (normalized)" % printarray(self.overlap, continuous=True), level=2)
+        # TODO: Do we have a multi-region processing order or ops issue?
+        t = self.brain.t
 
-        # Phase 2: Inhibition
-        activating = self.do_inhibition()
-        if VERBOSITY >= 2: log("%s << Activating (inhibited)" % printarray(activating, continuous=True), level=2)
+        # Phase 1: Terminate spikes that have reached cell body, and increment
+        # activation
+        self.do_terminate_spikes()
 
+        # Phase 2: Inhibit activating cells > activation threshold (generate
+        # SDR)
+        if True:
+            spiking_after_inhibition = self.do_inhibition()
+        else:
+            spiking_after_inhibition = np.zeros(self.n_cells)
+            for i, c in enumerate(self.cells):
+                if c.activation > CELL_ACTIVATION_THRESH:
+                    spiking_after_inhibition[i] = 1
 
-        # Phase 3: Learning
-        if learning_enabled:
-            if VERBOSITY >= 2: log("%s << Active Duty Cycle" % printarray(self.active_duty_cycle, continuous=True), level=2)
-            if VERBOSITY >= 2: log("%s << Overlap Duty Cycle" % printarray(self.overlap_duty_cycle, continuous=True), level=2)
-            self.do_learning(activating)
+        # Phase 3: Generate spikes from cells active after inhibition
+        self.do_generate_spikes(spiking_after_inhibition)
 
-
-        # Phase 4: Calculate new activations
-        # Save pre-step activations
         self.last_activation = [cell.activation for cell in self.cells]
-        # Update activations
-        for i, cell in enumerate(self.cells):
-            if activating[i]:
-                cell.activation = 1.0  # Max out
-            else:
-                cell.activation -= cell.fade_rate
-            if cell.activation < 0:
-                cell.activation = 0.0
-            self.activation[i] = cell.activation
-        if VERBOSITY >= 2: log("%s << Activations" % self.print_cells(), level=2)
-
-
-        # Phase 5: Calculate Distal Biases (TM?)
-        self.pre_bias = np.copy(self.bias)
-        self.bias = self.calculate_biases()
-        if VERBOSITY >= 2: log("%s << Bias" % printarray(self.bias, continuous=True), level=2)
-
-        if VERBOSITY >= 1:
-            # Log average synapse permanence in region
-            permanences = []
-            n_connected = 0
-            n_synapses = 0
-            for cell in self.cells:
-                for seg in cell.proximal_segments:
-                    permanences.append(util.average(seg.syn_permanences))
-                    n_synapses += seg.n_synapses()
-                    n_connected += len(filter(lambda x : x > CONNECTED_PERM, seg.syn_permanences))
-            ave_permanence = util.average(permanences)
-            p_connected = (n_connected/float(n_synapses))*100. if n_synapses else 0.0
-            log("R%d - average proximal synapse permanence: %.1f (%.1f%% connected of %d)" % (self.index, ave_permanence, p_connected, n_synapses), level=1)
-
-
 
     ##################
-    # Primary Step Function
+    # Primary Processing Function
     ##################
 
-    def step(self, input, learning_enabled=False):
+    def process(self, input, learning_enabled=False):
         '''Process inputs for a region.
 
         After step is complete:
-            * self.bias is an array of biases based on activations after step
-            * self.overlap is an array based on proximal connections to new inputs
+            * self.pre_activation...
             * self.last_activation is an array of activations before new input
-            * self.pre_bias is an array of biases before new input
             * cell.activation for each cell is updated
         '''
         self.input = input
-
-        self.tempero_spatial_pooling(learning_enabled=learning_enabled)  # Calculates active cells
-
+        self.region_process()  # Calculates active cells
         return [c.activation for c in self.cells]
+
+    ##################
+    # Learning Rules
+    ##################
+
+    def learn(self):
+        '''Update permanences and distances for each segment in region
+        according to learning rules.
+
+        For each synapse connected to a currently spiking source:
+            - Calculate distance between spikes (and order, before/after)
+            - If distance is within learning radius:
+                - Move synapse towards nearest spike (either towards or away from cell body)
+
+        Implications:
+            First spike doesn't shift/learn (since no closest spike yet exists)
+        '''
+        for i, cell in enumerate(self.cells):
+            for seg in cell.all_segments():
+                for j in seg.connected_synapses():
+                    source = seg.source_cell(j)
+                    dist = seg.syn_distances[j]
+                    if source:
+                        if source.spiking:
+                            nearest_spike_rel_dist = seg.nearest_spike(j)
+                            if nearest_spike_rel_dist is not None:
+                                if abs(nearest_spike_rel_dist) < LEARN_SPIKE_DIST:
+                                    if nearest_spike_rel_dist != 0.0:
+                                        # Spike has passed synapse
+                                        passed = nearest_spike_rel_dist < 0
+                                        move_toward = passed
+                                        change = min(
+                                            [LEARN_DIST_CHANGE, nearest_spike_rel_dist])
+                                        if move_toward:
+                                            # Distance reduces (toward cell
+                                            # body)
+                                            change *= -1
+                                        seg.syn_distances[j] += change
+                                        log("Synapse %d on %s @ %s moving %s towards %s" % (
+                                            j, seg, dist, change, nearest_spike_rel_dist))
+                                    else:
+                                        log("Synapse %d on %s @ %s coincident!" % (
+                                            j, seg, dist))
+                                    seg.syn_permanences[
+                                        j] += self.brain.config("PERM_LEARN_INC")
+                                    if seg.syn_permanences[j] > 1:
+                                        seg.syn_permanences[j] = 1
+
+                seg.decay_permanences()
 
 
 class PPHTMBrain(object):
+
     '''
     Predictive Processing implementation of HTM.
     With added continuous timing strategy.
@@ -800,37 +730,35 @@ class PPHTMBrain(object):
 
         # Brain config
         self.n_inputs = r1_inputs
-        self.min_overlap = min_overlap # A minimum number of inputs that must be active for a column to be considered during the inhibition step
+        # A minimum number of inputs that must be active for a column to be
+        # considered during the inhibition step
+        self.min_overlap = min_overlap
         # Defaults
         self.CONFIG = {
-            "PROXIMAL_ACTIVATION_THRESHHOLD": 3,
-            "DISTAL_ACTIVATION_THRESHOLD": 2,
-            "BOOST_MULTIPLIER": 2.58,
-            "DESIRED_LOCAL_ACTIVITY": 2,
+            "DESIRED_LOCAL_ACTIVITY": 1,
             "DISTAL_SYNAPSE_CHANCE": 0.4,
             "TOPDOWN_SYNAPSE_CHANCE": 0.3,
             "MAX_PROXIMAL_INIT_SYNAPSE_CHANCE": 0.4,
             "MIN_PROXIMAL_INIT_SYNAPSE_CHANCE": 0.1,
-            "CELLS_PER_REGION": 14**2,
+            "CELLS_PER_REGION": 13**2,
             "N_REGIONS": 2,
             "BIAS_WEIGHT": 0.6,
             "OVERLAP_WEIGHT": 0.4,
-            "FADE_RATE": 0.5,
-            "DISTAL_SEGMENTS": 3,
+            "FADE_RATE": 0.9,
+            "DISTAL_SEGMENTS": 1,
             "PROX_SEGMENTS": 2,
-            "TOPDOWN_SEGMENTS": 1,
+            "TOPDOWN_SEGMENTS": 0,
             "TOPDOWN_BIAS_WEIGHT": 0.5,
             "SYNAPSE_DECAY_PROX": 0.00005,
             "SYNAPSE_DECAY_DIST": 0.0,
             "PERM_LEARN_INC": 0.07,
             "PERM_LEARN_DEC": 0.04,
-            "CHANCE_OF_INHIBITORY": 0.1,
+            "CHANCE_OF_INHIBITORY": 0.0,
             "DIST_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD": 1.0,
             "PROX_SYNAPSE_ACTIVATION_LEARN_THRESHHOLD": 0.5,
             "DISTAL_BOOST_MULT": 0.01,
             "INHIBITION_RADIUS_DISCOUNT": 0.8
         }
-
 
     def __repr__(self):
         return "<PPHTMBrain regions=%d>" % len(self.regions)
@@ -854,9 +782,11 @@ class PPHTMBrain(object):
         for i in range(self.config("N_REGIONS")):
             top_region = i == self.config("N_REGIONS") - 1
             cpr = self.config("CELLS_PER_REGION")
-            r = Region(self, i, n_inputs=n_inputs, n_cells=cpr, n_cells_above=cpr if not top_region else 0)
+            r = Region(self, i, n_inputs=n_inputs, n_cells=cpr,
+                       n_cells_above=cpr if not top_region else 0)
             r.initialize()
-            n_inputs = cpr  # Next region will have 1 input for each output cell
+            # Next region will have 1 input for each output cell
+            n_inputs = cpr
             self.regions.append(r)
         self.t = 0
         log("Initialized %s" % self)
@@ -868,7 +798,8 @@ class PPHTMBrain(object):
         overlappedCells = r0.overlap > 0
         nBiasedCells = np.sum(biasedCells)
         nPredictedCells = np.sum(overlappedCells & biasedCells)
-        matchScore = nPredictedCells / float(nBiasedCells) if nBiasedCells > 0 else 0.0
+        matchScore = nPredictedCells / \
+            float(nBiasedCells) if nBiasedCells > 0 else 0.0
         anomalyScore = 1. - matchScore
         if anomalyScore < 0.0 or anomalyScore > 1.0:
             print biasedCells
@@ -880,8 +811,7 @@ class PPHTMBrain(object):
             raise Exception("anomalyScore out of range: %s" % anomalyScore)
         return (anomalyScore, nBiasedCells, nPredictedCells)
 
-
-    def process(self, readings, learning=False):
+    def step(self, readings, learning=False):
         '''
         Step through all regions inputting output of each into next
         Returns output of last region
@@ -890,8 +820,13 @@ class PPHTMBrain(object):
         self.inputs = readings
         _in = self.inputs
         for i, r in enumerate(self.regions):
-            log("Step processing for region %d\n%s << Input" % (i, printarray(_in, continuous=True)), level=2)
-            out = r.step(_in, learning_enabled=learning)
+            log("Step processing for region %d\n%s << Input" %
+                (i, printarray(_in, continuous=True)), level=2)
+            out = r.process(_in, learning_enabled=learning)
             _in = out
-        self.t += 1 # Move time forward one step
+        if learning:
+            for i, r in enumerate(self.regions):
+                log("Learning for region %d" % (i), level=2)
+                r.learn()
+        self.t += 1  # Move time forward one step
         return out
